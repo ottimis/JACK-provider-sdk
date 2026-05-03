@@ -1,0 +1,700 @@
+/**
+ * JackProvider — plugin contract for an AI provider integration.
+ *
+ * A provider package (in-tree `providers/claude/`, future external
+ * `jack-codex`, `jack-gemini`, …) registers a single `JackProvider` object
+ * that wires up everything the host needs to drive that AI:
+ *
+ *   - one or more {@link BackendDescriptor}s (the wire-protocol implementations)
+ *   - a {@link CapabilityMatrix} so the UI knows what features to show
+ *   - a {@link ToolDescriptor} catalog so the renderer can map provider-native
+ *     tool names to canonical Jack shapes
+ *   - a {@link JackProvider.detect} probe so the gate UI can warn when the
+ *     host lacks a usable installation
+ *
+ * This file is the boundary between Jack core and a provider package — keep
+ * it free of provider-specific imports.
+ */
+
+import type { AgentBackend, AgentQueryOptions } from './backend'
+import type {
+  ClientToolHandler,
+  NormalizedMessage,
+  NormalizedToolRef,
+  ProviderUserContentPolicy,
+  ToolShape
+} from '@ottimis/jack-chat-core'
+
+export type ProviderId = string
+
+/**
+ * Slash-command definition surfaced by a provider. Different providers
+ * source these differently — Claude scans `.claude/commands/` and
+ * declares a fixed list of CLI builtins; Codex / Gemini have their own
+ * conventions or none at all. The rendered shape is the same.
+ */
+export type SlashCommandDef = {
+  name: string
+  scope: 'user' | 'project' | 'builtin'
+  description?: string
+  argumentHint?: string
+  body: string
+  filePath: string
+}
+
+/**
+ * Parsed envelope a provider's CLI may wrap slash commands in when it logs
+ * them into the session transcript. Claude uses
+ * `<command-name>foo</command-name><command-args>bar</command-args>` plus
+ * an optional `<local-command-stdout>...</local-command-stdout>`.
+ */
+export type ParsedSlashEnvelope = {
+  commandName: string
+  commandArgs?: string
+  commandStdout?: string
+}
+
+/**
+ * Provider-declared slash-command support. Every field is optional so a
+ * partial implementation degrades gracefully — e.g. a provider with
+ * builtin commands but no envelope detection just declares
+ * `builtins` and the host skips the envelope hook.
+ */
+export type SlashCommandSupport = {
+  /** Static catalog of builtins the runtime intercepts. */
+  builtins: SlashCommandDef[]
+  /**
+   * Scan host filesystem for user/project file-based commands. Returns
+   * the catalog of file-based defs the user has authored locally. Empty
+   * array when the provider doesn't support file-based commands.
+   */
+  scanCommands?(projectPath?: string): Promise<SlashCommandDef[]>
+  /**
+   * Detect the provider's slash envelope inside a user message text.
+   * Return null when the text doesn't match — caller renders it as a
+   * normal user bubble. Plumbed through `ReduceContext.parseSlashEnvelope`
+   * to chat-core's reducer.
+   */
+  parseEnvelope?(text: string): ParsedSlashEnvelope | null
+  /**
+   * True when the message body is only CLI markers (e.g. Claude's
+   * `<local-command-stdout>...</local-command-stdout>` blobs that show
+   * up between turns). Used by `loadHistory` to drop noise from the
+   * transcript. Plumbed through `ReduceContext.isCliMarkerOnly`.
+   */
+  isCliMarkerOnly?(text: string): boolean
+  /**
+   * Substitute the provider's argument placeholders in a file-based
+   * command body. Claude uses `$N` (positional) and `$ARGUMENTS` (full
+   * raw args). Other providers with file-based commands declare their
+   * own substitution rule.
+   */
+  expandBody?(def: SlashCommandDef, rawArgs: string): string
+  /**
+   * Subscribe to wire-sourced slash command updates. Used by providers
+   * that surface their command catalog dynamically over the wire instead
+   * of (or in addition to) on-disk files — Gemini ACP emits a
+   * `session/update { sessionUpdate: 'available_commands_update' }`
+   * notification per session with the runtime command list.
+   *
+   * Contract:
+   *   - The provider invokes the callback whenever the wire publishes a
+   *     new catalog. The callback receives the FULL set (not a delta) so
+   *     the host's command store can replace verbatim.
+   *   - Returns an unsubscribe function. The host calls it on session
+   *     close.
+   *   - Optional. Providers without wire-driven commands (Claude file-
+   *     based, Codex no-commands) leave it undefined and the host falls
+   *     back to {@link builtins} + {@link scanCommands}.
+   *
+   * Wire-sourced commands COEXIST with `builtins` and `scanCommands` —
+   * the host merges the three sets (wire takes precedence on name
+   * collisions, since it reflects the agent's actual runtime state).
+   */
+  subscribeToWireCommands?(
+    sessionId: string,
+    callback: (commands: SlashCommandDef[]) => void
+  ): () => void
+}
+
+/**
+ * Options for {@link JackProvider.readSessionTranscript}. Provider-neutral
+ * superset of what each backend supports — providers ignore fields they
+ * can't honor (e.g. a remote-only provider with no on-disk replay).
+ */
+export type ReadSessionTranscriptOptions = {
+  /** Provider-side conversation id (the value persisted in `sessions.provider_session_id`). REQUIRED. */
+  providerSessionId: string
+  /** cwd hint Claude needs to find the right `~/.claude/projects/<encoded>` dir. */
+  cwd?: string
+  /** Cap on the number of messages returned (caller decides head vs tail). */
+  limit?: number
+  /** Skip ahead N messages before reading (caller-driven pagination). */
+  offset?: number
+  /**
+   * When true, include host-injected `system` rows (init, etc.). Default
+   * false matches the existing behavior of the Claude SDK loader and the
+   * current consumers.
+   */
+  includeSystemMessages?: boolean
+}
+
+/**
+ * Provider-declared model identifiers used by host one-shot tasks. These
+ * are the bits of "we need to ask the model something cheap and quick"
+ * (session-name suggestion, agent-def suggestion, shared-template hint)
+ * that previously hardcoded `claude-haiku-4-5` everywhere. Each provider
+ * picks its own cheapest acceptable model.
+ */
+export type ProviderModelDefaults = {
+  /**
+   * Cheapest model the host should use for one-shot suggester tasks.
+   * MUST be available on every account that has the provider installed —
+   * suggesters degrade if the user can't access it.
+   */
+  oneShot: string
+}
+
+/**
+ * One entry of the inline model dropdown rendered under the chat composer.
+ * `value` is what gets passed to the provider's `/model` slash handler;
+ * `label` is the short human display (e.g. `Sonnet`, `Pro`, `Flash`).
+ */
+export type ProviderModelOption = {
+  value: string
+  label: string
+}
+
+/**
+ * Declarative rules a provider hands the host so the host knows *how* to
+ * handle the provider's content — chat sanitization, future system-prompt
+ * injection strategy, future tool-name detection hints.
+ *
+ * Today only `userContent` is wired; new namespaces are added as additional
+ * optional fields without breaking external provider packages. The host
+ * forwards the relevant slice to its consumer:
+ *   - `userContent` → `provider.readSessionTranscript` (on-disk replay) +
+ *     chat-core `ReduceContext.userContentPolicy` (live wire + history).
+ *
+ * Empty / undefined fields are no-ops.
+ */
+export type ProviderPolicies = {
+  userContent?: ProviderUserContentPolicy
+}
+
+/**
+ * Capabilities the UI gates on. Honest declaration > aspirational —
+ * a provider that lies here will produce dead UI affordances.
+ *
+ * When you add a feature to Jack that depends on a provider primitive,
+ * add a flag here so the corresponding renderer can opt out for providers
+ * that don't support it.
+ */
+export type CapabilityMatrix = {
+  /** Token-by-token assistant streaming (Claude `stream_event`). */
+  partialMessages: boolean
+  /** Hook events the provider can emit. */
+  hooks: {
+    PreToolUse: boolean
+    PostToolUse: boolean
+  }
+  /** Native plan-mode primitive (Claude `ExitPlanMode`). */
+  planMode: boolean
+  /** Native question primitive (Claude `AskUserQuestion`). */
+  askUserQuestion: boolean
+  /** Subagent spawn: 'native' = provider has it, 'polyfill' = simulated, 'none' = absent. */
+  subagents: 'native' | 'polyfill' | 'none'
+  /** MCP (Model Context Protocol) server support. */
+  mcp: boolean
+  /** Claude-style structuredPatch in PostToolUse for fs.edit/fs.write. */
+  structuredPatch: boolean
+  /** Resume an existing session by id (preserves chat history across spawns). */
+  resumeSession: boolean
+  /** Switch model live without respawn (Claude control request `set_model`). */
+  liveModelSwitch: boolean
+  /** Switch permission mode live without respawn. */
+  livePermissionModeSwitch: boolean
+  /**
+   * Permission flow granularity.
+   *
+   *   - `'callback'` — the provider exposes a per-call canUseTool callback:
+   *     each tool invocation can be blocked, modified, or auto-allowed
+   *     before it fires (Claude). The renderer subscribes to the channel
+   *     and the user sees every request.
+   *   - `'sandbox-only'` — no per-call callback. The sandbox / approval
+   *     policy is set at spawn time and the sandbox blocks violations as
+   *     runtime errors; the model reads the error and self-corrects
+   *     (Codex). The PermissionCard has no channel to subscribe to: the
+   *     renderer hides it and only shows the post-fact audit log.
+   */
+  permissionGranularity: 'callback' | 'sandbox-only'
+}
+
+/**
+ * Re-exports of canonical wire-shape types from chat-core so consumers of
+ * this SDK get them at the same import path. Keeps `JackProvider` type
+ * definitions self-contained in this package.
+ */
+export type { ToolShape }
+export type {
+  ClientToolHandler,
+  ClientToolHandlerContext,
+  ClientFsHandler,
+  ClientTerminalHandler,
+  ClientToolsHandler,
+  TerminalSpec,
+  TerminalHandle,
+  TerminalOutput,
+  RegisteredTool,
+  ToolCallResult
+} from '@ottimis/jack-chat-core'
+
+export type ToolDescriptor = {
+  /** Name as the provider emits it on the wire (e.g. 'Edit', 'apply_patch'). */
+  providerToolName: string
+  /** Canonical shape — the renderer keys off this. */
+  shape: ToolShape
+  /**
+   * Hint for renderer / analytics card classification:
+   *
+   *   - `'bespoke'`: the renderer has a dedicated React card (Read,
+   *     Write, Edit, Bash, apply_patch, …).
+   *   - `'schema'`: the renderer uses SmartGenericRegistry to build a
+   *     data-driven card (CronCreate, Skill, EnterPlanMode, …).
+   *   - omitted = `'generic'` fallback (JSON renderer).
+   *
+   * MCP tools (`mcp__<slug>__<name>`) are classified separately via
+   * `parseToolName` → kind=mcp and don't need this flag.
+   */
+  cardStyle?: 'bespoke' | 'schema'
+}
+
+/**
+ * Probe result for {@link JackProvider.detect}. Used by the bootstrap
+ * gate UI (`ProviderGate`) to decide whether to render the rest of the
+ * app and, when missing or unauthenticated, what affordance to show
+ * (install command, sign-in flow, docs link).
+ *
+ * On the `installed: true` branch, `authenticated` is an OPTIONAL
+ * three-state signal:
+ *   - `true`  → credentials present and probably valid
+ *   - `false` → binary present, credentials missing or expired
+ *   - omitted → provider doesn't model auth (e.g. SDK that's self-contained,
+ *               or auth is implicit via the same install)
+ */
+export type ProviderDetectResult =
+  | {
+      installed: true
+      /** Tri-state: true = creds present, false = creds missing/expired, undefined = N/A. */
+      authenticated?: boolean
+      /** Human-readable reason when `authenticated: false` (e.g. "OAuth token expired"). */
+      authReason?: string
+      /** Single-line command that authenticates (e.g. `claude login` / `codex login` / `gemini auth login`). */
+      signInCommand?: string
+      /** External docs URL for the auth flow when distinct from install docs. */
+      authDocsUrl?: string
+      details?: Record<string, unknown>
+    }
+  | {
+      installed: false
+      reason: string
+      probedPaths?: string[]
+      /** Single-line shell command that installs the missing runtime. */
+      installCommand?: string
+      /** External docs URL pointing at the canonical install guide. */
+      docsUrl?: string
+    }
+
+/**
+ * One backend = one wire-protocol implementation. A provider can ship
+ * several (Claude: `sdk` bundles cli.js inside the asar, `cli` calls the
+ * user's locally installed binary). Selection happens via
+ * `JACK_AGENT_BACKEND` env var; default is `JackProvider.defaultBackendId`.
+ *
+ * `factory` is lazy so unused backends pay zero cost at boot.
+ */
+export type BackendDescriptor = {
+  id: string
+  label: string
+  factory: () => AgentBackend
+  /**
+   * True when the backend ships its own runtime and doesn't depend on a
+   * host install (e.g. Claude's `sdk` backend embeds `cli.js` inside the
+   * asar). The bootstrap gate skips the install-missing screen when the
+   * active backend is self-contained, regardless of `detect()` result.
+   * Defaults to `false` for backends that drive a host-installed binary.
+   */
+  selfContained?: boolean
+  /**
+   * Backend-level capability overrides. When present, these take precedence
+   * over the provider-level {@link CapabilityMatrix} for sessions running
+   * on this backend. Provider-level remains the default for backends that
+   * don't override.
+   *
+   * Use case: Gemini ships `cli` (stream-json) and `acp` (JSON-RPC)
+   * transports with **different** feature sets — ACP exposes structured
+   * plan, live model switch, callback-style permission gating; stream-json
+   * has none. The provider declares the LCD at provider-level and ACP
+   * overrides the deltas. Pattern A providers (Claude SDK/CLI are wire-
+   * identical) typically don't need this and leave it undefined.
+   */
+  capabilities?: Partial<CapabilityMatrix>
+}
+
+/**
+ * Context the host hands to {@link JackProvider.prepareSpawnOptions} so the
+ * provider can decide what to wire (e.g. asar-unpacked CLI path in packaged
+ * builds vs. a no-op in dev). Kept narrow on purpose — providers that need
+ * more state should read it themselves.
+ */
+export type PrepareSpawnContext = {
+  /** True in packaged builds (Electron `app.isPackaged`). */
+  isPackaged: boolean
+}
+
+/**
+ * MCP server registration in canonical Anthropic spec shape. Used by
+ * {@link KnowledgeContext.mcpServers} as the cross-provider exchange format
+ * for `kind=mcp` knowledge sources. Each provider's
+ * {@link JackProvider.applyKnowledgeContext} translates this into whatever
+ * its native runtime expects (Claude SDK `mcpServers` map; Codex
+ * `mcp_servers.toml`; …).
+ */
+export type KnowledgeMcpResolution =
+  | { type: 'stdio'; command: string; args?: string[]; env?: Record<string, string> }
+  | { type: 'http'; url: string; headers?: Record<string, string> }
+  | { type: 'sse'; url: string; headers?: Record<string, string> }
+
+/**
+ * Provider-neutral container for everything the host has computed about the
+ * agent's working context: the system prompt addendum (markdown), the extra
+ * working directories, and any MCP server registrations resolved from
+ * `kind=mcp` knowledge sources.
+ *
+ * The host merges multiple KnowledgeContexts (workspace context +
+ * AgentDefinition knowledge + per-instance overrides) into one before
+ * handing it to {@link JackProvider.applyKnowledgeContext}, which folds it
+ * into the provider's native {@link AgentQueryOptions} shape.
+ */
+export type KnowledgeContext = {
+  /**
+   * Markdown block to append to the agent's system prompt. Already formatted
+   * — providers can either embed it verbatim (Claude `systemPrompt.append`)
+   * or split it across system / first-user message (other providers).
+   */
+  systemPromptAppend: string
+  /** Absolute paths the agent should treat as part of its working set. */
+  directories: string[]
+  /** Resolved MCP server registrations keyed by slug. */
+  mcpServers: Record<string, KnowledgeMcpResolution>
+}
+
+/**
+ * Visual identity declared by each provider. The host surfaces it in the
+ * chat composer + sidebar so the user sees which provider is driving a
+ * session at a glance.
+ *
+ * Lightweight by design — providers shouldn't need to ship images or
+ * elaborate themes. Renderer treats `accentColor` as a CSS color (any
+ * format CSS accepts) and `iconKey` as an enum of curated lucide icon
+ * names the renderer maps to React components. Providers that don't
+ * declare branding fall back to neutral defaults.
+ */
+export type ProviderBranding = {
+  /**
+   * Primary accent color. Used as a subtle border on the chat composer +
+   * a small dot/icon next to the provider name in sidebar entries.
+   * Format: any valid CSS color (`#ff6b6b`, `oklch(...)`).
+   *
+   * Choose a color with enough contrast on both light + dark themes
+   * (~50% lightness works). The renderer applies it at low opacity for
+   * borders so vivid hex codes are fine.
+   */
+  accentColor: string
+  /**
+   * Curated icon key — one of the names the renderer maps to a lucide
+   * component. Keeping this an enum (instead of free-form SVG/asset)
+   * means providers don't ship rendering assets and the host stays in
+   * control of what shapes can land in the UI.
+   */
+  iconKey?: string
+}
+
+export type JackProvider = {
+  id: ProviderId
+  label: string
+  /**
+   * Visual identity (accent color + icon) the renderer can use to mark
+   * which provider drives a session. Optional; renderer falls back to
+   * neutral host theme when absent.
+   */
+  branding?: ProviderBranding
+  /**
+   * Probe the host to see if the provider is usable (binary installed,
+   * credentials present, …). Surface result in the bootstrap gate.
+   */
+  detect(): Promise<ProviderDetectResult>
+  backends: BackendDescriptor[]
+  /** Must match one of `backends[].id`. Used when no env override is set. */
+  defaultBackendId: string
+  capabilities: CapabilityMatrix
+  /**
+   * Declarative rules that tell the host how to interpret this provider's
+   * data. Distinct from {@link CapabilityMatrix} (what the provider CAN do
+   * — drives UI gating) — `policies` say *how* the host should handle
+   * content the provider emits or persists. Provider authors declare them
+   * statically; the host consumes them at well-defined entry points
+   * (`readSessionTranscript`, chat-core reducer via ReduceContext, …).
+   *
+   * Optional everywhere: a provider that doesn't need any rule simply
+   * omits the field. New rule namespaces grow {@link ProviderPolicies}
+   * without breaking existing providers.
+   */
+  policies?: ProviderPolicies
+  /**
+   * Default model identifiers for host one-shot tasks. Read by suggester
+   * call sites (session naming, agent-def hint, shared-template hint) so
+   * they don't hardcode a Claude-specific model.
+   */
+  modelDefaults: ProviderModelDefaults
+  /**
+   * Options surfaced in the inline Model dropdown under the chat composer.
+   * Empty / omitted = no Model dropdown rendered (regardless of
+   * `liveModelSwitch`). Selection fires the provider's `/model <value>`
+   * slash handler. Hardcoded list is fine for providers with a fixed
+   * family (Claude: opus/sonnet/haiku); providers whose available models
+   * are dynamic per-session (Gemini's `availableModels[]`) leave this
+   * empty until a per-session push lands.
+   */
+  modelOptions?: readonly ProviderModelOption[]
+  /**
+   * Reasoning-effort tiers surfaced in the inline Effort dropdown.
+   * Empty / omitted = no Effort dropdown rendered. Selection fires the
+   * provider's `/effort <value>` slash handler. Only Claude exposes
+   * effort tiers as a live switch; other providers (Codex via
+   * spawn-time, Gemini not at all) leave this empty.
+   */
+  effortLevels?: readonly string[]
+  /**
+   * Tools the provider surfaces in `tool_use` messages, with their
+   * canonical shape. Tools not listed fall back to the generic renderer.
+   * The `mcp__` prefixed tools are dynamic and resolved at runtime, not
+   * declared here.
+   */
+  toolCatalog: ToolDescriptor[]
+  /**
+   * Optional hook called by the host right before each `backend.query()`
+   * so the provider can wire packaging-specific spawn details (e.g.
+   * Claude's SDK backend pointing at an asar-unpacked `cli.js` and the
+   * macOS Electron Helper). Mutate `options` in place. Called once per
+   * spawn, after the host has already populated `cwd`, `mcpServers`,
+   * knowledge context, and any sandbox `spawner`. No-op for providers
+   * that don't need it (CLI-only, dev-only, …).
+   */
+  prepareSpawnOptions?(options: AgentQueryOptions, ctx: PrepareSpawnContext): void
+  /**
+   * Parse a wire tool name into a {@link NormalizedToolRef}. Each provider
+   * owns its own naming convention (Claude: `mcp__<slug>__<tool>` for MCP,
+   * literal name for native; Codex: `apply_patch` style; …). The host
+   * calls this whenever it needs to reason about a tool name without
+   * committing to a specific provider's format — e.g. detecting Jack's
+   * own MCP tools, MCP card classification, audit logs.
+   */
+  parseToolName(rawName: string): NormalizedToolRef
+  /**
+   * Optional slash-command support. Providers that surface a `/command`
+   * UX (Claude's `.claude/commands/`, the `<command-name>` envelope in
+   * transcripts, etc.) declare it here; providers without any slash
+   * convention (Codex, Gemini, …) leave it undefined and the renderer
+   * hides the slash autocomplete + skips envelope detection.
+   */
+  slashCommands?: SlashCommandSupport
+  /**
+   * Fold a provider-neutral {@link KnowledgeContext} into the provider's
+   * native {@link AgentQueryOptions} shape. Mutates `options` in place.
+   *
+   * Claude maps the three fields onto SDK options:
+   *   - `systemPromptAppend` → `systemPrompt.append`
+   *   - `directories` → `additionalDirectories`
+   *   - `mcpServers` → `mcpServers`
+   *
+   * Other providers may package the same data differently (e.g. Codex
+   * inlines MCP into a config TOML and treats `directories` as sandbox
+   * mount points). Called once per spawn, after the host has merged
+   * workspace context + AgentDefinition knowledge + per-instance
+   * overrides into a single {@link KnowledgeContext}.
+   */
+  applyKnowledgeContext(context: KnowledgeContext, options: AgentQueryOptions): void
+  /**
+   * Read a session's persisted transcript and return it as
+   * {@link NormalizedMessage}[]. Replaces direct `getSessionMessages`
+   * calls sprinkled across the host (indexer, mobile routes, IPC, name
+   * suggester) — those used to import from the Claude SDK and would
+   * crash for any other provider. Now they go through this hook.
+   *
+   * Implementations MUST:
+   *   - return rows in chronological order (oldest first)
+   *   - populate `messageId` on every message that has one in the source
+   *     (Claude JSONL `uuid` → top-level `messageId`)
+   *   - preserve `raw` verbatim (lossless)
+   *
+   * Returns an empty array when the session has no transcript yet (e.g.
+   * fresh row, never sent a turn).
+   */
+  readSessionTranscript(opts: ReadSessionTranscriptOptions): Promise<NormalizedMessage[]>
+  /**
+   * Attach an in-process MCP server to the spawn options. Used by the
+   * host to expose Jack-specific tools to the agent (e.g. partner
+   * transcript reader for reviewer/tester slots in pair mode) without
+   * going through an external MCP process.
+   *
+   * Provider-neutral spec: the host hands name/version + tool list, the
+   * provider wraps them into whatever shape its SDK accepts. Optional —
+   * providers without an in-process MCP API simply omit this method, and
+   * the host quietly degrades (the agent doesn't get the Jack tools).
+   *
+   * Claude wraps via `createSdkMcpServer` + `tool` from the agent SDK.
+   * Codex SDK has no in-process MCP — global `codex mcp add` only — so
+   * `codexProvider` leaves this undefined and pair-mode reviewers
+   * running on Codex don't get `get_partner_transcript`. Documented
+   * limitation.
+   */
+  attachInProcessMcpServer?(
+    options: AgentQueryOptions,
+    spec: InProcessMcpServerSpec
+  ): void
+  /**
+   * Pattern B (ACP-speaking providers like jack-gemini): the host injects
+   * a {@link ClientToolHandler} the provider invokes for fs/terminal/tools
+   * execution requested by the agent over JSON-RPC. The provider stores
+   * the reference and routes ACP `fs/*`, `terminal/*`, `tools/*` requests
+   * through it instead of calling `node:fs` / `node-pty` directly.
+   *
+   * Pattern A providers (Claude, Codex) leave this undefined; the host
+   * detects the pattern by absence and skips wiring.
+   *
+   * `ctx` carries the host's correlation ids the provider may want to
+   * bridge to wire-driven side channels (e.g. mapping
+   * `available_commands_update` notifications back to the renderer's
+   * slash command store via the host's session id). Optional for
+   * providers that don't need it.
+   */
+  attachClientToolHandler?(
+    handler: ClientToolHandler,
+    ctx?: { jackSessionId?: string }
+  ): void
+  /**
+   * Persisted permission rules manager. The host's
+   * `permissions:{list,add,remove}` IPC dispatches through this — providers
+   * that don't persist permission rules (sandbox-only models like Codex)
+   * leave it undefined and the host returns empty snapshots.
+   */
+  persistedPermissions?: PersistedPermissionsApi
+}
+
+/**
+ * Provider-neutral spec for an in-process MCP server the host wants to
+ * expose to the agent. Each tool carries a zod schema for argument
+ * validation + an async handler that produces MCP `content` blocks.
+ *
+ * Mirrors the surface of Claude's `tool()` factory but stays SDK-free
+ * here so non-Claude providers can implement
+ * {@link JackProvider.attachInProcessMcpServer} without dragging in
+ * `@anthropic-ai/claude-agent-sdk`.
+ */
+export type InProcessMcpServerSpec = {
+  name: string
+  version: string
+  tools: InProcessMcpToolSpec[]
+}
+
+/**
+ * Behaviour token the provider persists alongside each rule. Mirror of
+ * Claude's `permissions.{allow,deny,ask}` arrays — providers with a
+ * different vocabulary translate to/from this enum at their boundary.
+ */
+export type PermissionBehavior = 'allow' | 'deny' | 'ask'
+
+/**
+ * Layer the rule lives in. The four-way split mirrors Claude's
+ * user/userLocal/project/projectLocal settings cascade. Providers that
+ * persist fewer layers populate only the relevant blocks; consumers see
+ * empty arrays for the rest.
+ */
+export type PermissionSource = 'user' | 'userLocal' | 'project' | 'projectLocal'
+
+/**
+ * One persisted rule as the provider stores it. `tool` + `pattern` are a
+ * convenience parse — `raw` is the source of truth for round-trip writes
+ * (remove/add use the raw string verbatim).
+ */
+export type PermissionRule = {
+  /** Tool name (e.g. `Bash`, `Edit`, `mcp__figma__authenticate`). */
+  tool: string
+  /** Content inside the parens (the glob / pattern), or null if the rule has no parens. */
+  pattern: string | null
+  /** Original string as stored in the settings file — source of truth for round-trip writes. */
+  raw: string
+}
+
+export type PermissionsSourceBlock = {
+  source: PermissionSource
+  /** Absolute path of the settings file (null if no project context was provided). */
+  path: string | null
+  /** True if the file currently exists on disk. */
+  exists: boolean
+  allow: PermissionRule[]
+  deny: PermissionRule[]
+  ask: PermissionRule[]
+}
+
+export type PermissionsSnapshot = {
+  user: PermissionsSourceBlock
+  userLocal: PermissionsSourceBlock
+  project: PermissionsSourceBlock
+  projectLocal: PermissionsSourceBlock
+}
+
+/**
+ * Persisted permission rules manager — provider-declared, optional. The
+ * host's `permissions:list/add/remove` IPC dispatches through the active
+ * provider's implementation. Providers without a persisted permissions
+ * model leave this undefined and the host returns empty snapshots.
+ *
+ * The neutral shape (four sources × three behaviours × `tool(pattern)`
+ * rules) was generalised from Claude's `.claude/settings*.json` cascade
+ * but stays generic enough for other providers' approval-policy stores.
+ * A provider with a different vocabulary (e.g. Codex `approval_policy`
+ * keyed by command prefix) translates inside this method.
+ */
+export type PersistedPermissionsApi = {
+  list(projectPath?: string): PermissionsSnapshot
+  remove(
+    source: PermissionSource,
+    behavior: PermissionBehavior,
+    rawRule: string,
+    projectPath?: string
+  ): boolean
+  add(
+    source: PermissionSource,
+    behavior: PermissionBehavior,
+    rawRule: string,
+    projectPath?: string
+  ): boolean
+}
+
+export type InProcessMcpToolSpec = {
+  name: string
+  description: string
+  /**
+   * Zod schema for the tool arguments. Providers that don't speak zod
+   * natively can call `.shape` to inspect fields. We keep zod here
+   * instead of JSON Schema because the host already uses it everywhere
+   * (one source of truth for tool shapes).
+   */
+  schema: Record<string, unknown>
+  handler: (args: Record<string, unknown>) => Promise<{
+    content: Array<{ type: 'text'; text: string }>
+    isError?: boolean
+  }>
+}
