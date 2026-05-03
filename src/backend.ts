@@ -65,10 +65,18 @@ export type AgentSystemPrompt =
   | { type: 'preset'; preset: string; append?: string }
 
 /**
- * MCP server configuration — opaque to the host. The host never inspects
- * the inner shape; each provider validates / consumes its own format.
+ * MCP server configuration handed to the provider via
+ * {@link AgentQueryOptions.mcpServers}. Mirrors the official MCP wire
+ * format (the same shape Anthropic, OpenAI, and Google all consume).
+ *
+ * Replaces the legacy opaque `AgentMcpServerConfig = unknown` so the
+ * type system enforces the contract end-to-end and the host can inspect
+ * the bag for telemetry / preview without double-translating.
  */
-export type AgentMcpServerConfig = unknown
+export type McpServerSpec =
+  | { type: 'stdio'; command: string; args?: string[]; env?: Record<string, string> }
+  | { type: 'http'; url: string; headers?: Record<string, string> }
+  | { type: 'sse'; url: string; headers?: Record<string, string> }
 
 /** Reasoning-effort knob. Provider-validated; not all providers honor every value. */
 export type AgentEffortLevel = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
@@ -161,7 +169,7 @@ export type AgentQueryOptions = {
    * knowledge sources).
    */
   additionalDirectories?: string[]
-  mcpServers?: Record<string, AgentMcpServerConfig>
+  mcpServers?: Record<string, McpServerSpec>
   resume?: string
   /**
    * Initial model for the spawn. Live switches use
@@ -231,16 +239,24 @@ export interface AgentSession extends AsyncIterable<NormalizedMessage> {
    */
   setModel(model?: string): Promise<void>
   /**
-   * Merge arbitrary settings into the flag-settings layer at runtime.
-   * Used for values the provider exposes only as persisted flags
-   * (notably `effortLevel` on Claude).
+   * Switch the reasoning-effort tier live, without respawning the child
+   * process. Pass `undefined` to clear any override and let the provider
+   * fall back to its default. Gated by `CapabilityMatrix.liveEffortSwitch`
+   * — providers without live switching declare `false` and the renderer
+   * hides the inline Effort dropdown.
+   *
+   * Replaces the legacy `applyFlagSettings({ effortLevel })` bag — Claude
+   * was the only producer and Codex/Gemini both threw `UNSUPPORTED`. The
+   * host now calls this method by name and the type system tells the
+   * provider author exactly what to wire.
    */
-  applyFlagSettings(settings: Record<string, unknown>): Promise<void>
+  setEffortLevel(effort: AgentEffortLevel | undefined): Promise<void>
   /**
-   * Read the effective merged settings layer. The response shape is
-   * `{ effective, sources }` where `effective` is the deep-merged result.
-   * The host uses it to discover the runtime `effortLevel` the provider
-   * booted with.
+   * Read the effective runtime settings the provider booted with. Today
+   * the host only consumes `effective.effortLevel` to populate the
+   * Effort dropdown's initial value; the rest of the bag is opaque so
+   * providers with richer settings layers can passthrough additional
+   * keys without an SDK bump.
    */
   getSettings(): Promise<AgentSettingsResponse>
 }

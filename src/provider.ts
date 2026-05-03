@@ -16,7 +16,8 @@
  * it free of provider-specific imports.
  */
 
-import type { AgentBackend, AgentQueryOptions } from './backend'
+import type { AgentBackend, AgentQueryOptions, McpServerSpec } from './backend'
+import type { ZodType } from 'zod'
 import type {
   ClientToolHandler,
   NormalizedMessage,
@@ -28,19 +29,47 @@ import type {
 export type ProviderId = string
 
 /**
- * Slash-command definition surfaced by a provider. Different providers
- * source these differently — Claude scans `.claude/commands/` and
- * declares a fixed list of CLI builtins; Codex / Gemini have their own
- * conventions or none at all. The rendered shape is the same.
+ * Where the provider sourced a slash command from. Drives the
+ * {@link SlashCommandDef} discriminated union below — file-sourced
+ * commands carry `body` + `filePath`, builtin and wire-sourced ones
+ * don't (they don't *have* a markdown file behind them).
  */
-export type SlashCommandDef = {
+export type SlashCommandScope = 'builtin' | 'wire' | 'user' | 'project' | (string & {})
+
+/**
+ * Common surface every slash command def carries regardless of source.
+ * The renderer uses these for autocomplete + chip rendering.
+ */
+type SlashCommandDefBase = {
   name: string
-  scope: 'user' | 'project' | 'builtin'
   description?: string
   argumentHint?: string
-  body: string
-  filePath: string
 }
+
+/**
+ * Slash-command definition surfaced by a provider. Three sources can
+ * coexist (see {@link SlashCommandSupport}):
+ *
+ *   - `'builtin'` — static catalog the runtime intercepts. The renderer
+ *     never opens the file (there is none); the executor is the agent.
+ *   - `'wire'` — pushed live by the agent over the wire (Gemini ACP
+ *     `available_commands_update`). Same render contract as builtin —
+ *     no on-disk artifact.
+ *   - `'user' | 'project'` — file-based commands the user authored
+ *     (Claude `.claude/commands/foo.md`, future per-provider analogs).
+ *     `filePath` + `body` are required so the renderer can offer "open
+ *     in editor" affordances and the host can expand `$ARGUMENTS` /
+ *     `$N` placeholders.
+ *
+ * Discriminated by `scope` so consumers narrow before reading the
+ * file-only fields. Replaces the legacy uniform shape that forced
+ * builtin/wire commands to ship synthetic empty `body: ''` /
+ * `filePath: ''`.
+ */
+export type SlashCommandDef =
+  | (SlashCommandDefBase & { scope: 'builtin' })
+  | (SlashCommandDefBase & { scope: 'wire' })
+  | (SlashCommandDefBase & { scope: 'user' | 'project'; body: string; filePath: string })
 
 /**
  * Parsed envelope a provider's CLI may wrap slash commands in when it logs
@@ -212,6 +241,14 @@ export type CapabilityMatrix = {
   resumeSession: boolean
   /** Switch model live without respawn (Claude control request `set_model`). */
   liveModelSwitch: boolean
+  /**
+   * Switch reasoning-effort tier live without respawn. Drives whether the
+   * inline Effort dropdown fires `setEffortLevel()` (true) or requires a
+   * spawn-time setting (false → dropdown hidden / annotated). Decoupled
+   * from `liveModelSwitch` because Codex has live model but spawn-time
+   * effort.
+   */
+  liveEffortSwitch: boolean
   /** Switch permission mode live without respawn. */
   livePermissionModeSwitch: boolean
   /**
@@ -353,17 +390,19 @@ export type PrepareSpawnContext = {
 }
 
 /**
- * MCP server registration in canonical Anthropic spec shape. Used by
- * {@link KnowledgeContext.mcpServers} as the cross-provider exchange format
- * for `kind=mcp` knowledge sources. Each provider's
- * {@link JackProvider.applyKnowledgeContext} translates this into whatever
- * its native runtime expects (Claude SDK `mcpServers` map; Codex
- * `mcp_servers.toml`; …).
+ * MCP server registration in canonical wire-format shape. Same type
+ * used at both ends of the knowledge pipeline: as
+ * {@link KnowledgeContext.mcpServers} (input to the provider) and as
+ * {@link AgentQueryOptions.mcpServers} (output from
+ * {@link JackProvider.applyKnowledgeContext}). Each provider's
+ * applyKnowledgeContext translates the merged context into its native
+ * runtime layout (Claude SDK `mcpServers` map; Codex `mcp_servers.toml`;
+ * Gemini ACP `session/new { mcpServers }`).
+ *
+ * Re-exported as `McpServerSpec` from `./backend` — same type, two names
+ * for ergonomics in different code paths.
  */
-export type KnowledgeMcpResolution =
-  | { type: 'stdio'; command: string; args?: string[]; env?: Record<string, string> }
-  | { type: 'http'; url: string; headers?: Record<string, string> }
-  | { type: 'sse'; url: string; headers?: Record<string, string> }
+export type KnowledgeMcpResolution = McpServerSpec
 
 /**
  * Provider-neutral container for everything the host has computed about the
@@ -400,6 +439,24 @@ export type KnowledgeContext = {
  * names the renderer maps to React components. Providers that don't
  * declare branding fall back to neutral defaults.
  */
+/**
+ * Curated icon catalog keys the renderer knows how to map to lucide React
+ * components. Hybrid closed/open: well-known values get autocomplete;
+ * arbitrary strings still type-check (the renderer falls back to a default
+ * icon for unknown keys, so a provider can ship a forward-looking key
+ * without breaking older hosts).
+ */
+export type ProviderIconKey =
+  | 'sparkles'
+  | 'cpu'
+  | 'gem'
+  | 'bot'
+  | 'brain'
+  | 'star'
+  | 'wand'
+  | 'zap'
+  | (string & {})
+
 export type ProviderBranding = {
   /**
    * Primary accent color. Used as a subtle border on the chat composer +
@@ -412,12 +469,13 @@ export type ProviderBranding = {
    */
   accentColor: string
   /**
-   * Curated icon key — one of the names the renderer maps to a lucide
-   * component. Keeping this an enum (instead of free-form SVG/asset)
-   * means providers don't ship rendering assets and the host stays in
-   * control of what shapes can land in the UI.
+   * Curated icon key — one of {@link ProviderIconKey}. Keeping this a
+   * closed/open enum (instead of free-form SVG/asset) means providers
+   * don't ship rendering assets and the host stays in control of what
+   * shapes can land in the UI. Unknown keys fall back to a default icon
+   * in the renderer.
    */
-  iconKey?: string
+  iconKey?: ProviderIconKey
 }
 
 export type JackProvider = {
@@ -572,16 +630,10 @@ export type JackProvider = {
    *
    * Pattern A providers (Claude, Codex) leave this undefined; the host
    * detects the pattern by absence and skips wiring.
-   *
-   * `ctx` carries the host's correlation ids the provider may want to
-   * bridge to wire-driven side channels (e.g. mapping
-   * `available_commands_update` notifications back to the renderer's
-   * slash command store via the host's session id). Optional for
-   * providers that don't need it.
    */
   attachClientToolHandler?(
     handler: ClientToolHandler,
-    ctx?: { jackSessionId?: string }
+    ctx: ClientToolHandlerAttachContext
   ): void
   /**
    * Persisted permission rules manager. The host's
@@ -609,6 +661,34 @@ export type InProcessMcpServerSpec = {
 }
 
 /**
+ * Context the host hands to {@link JackProvider.attachClientToolHandler}
+ * so the provider can bridge wire-driven side channels back to the host
+ * (e.g. mapping Gemini's `available_commands_update` notifications to
+ * the renderer's per-session slash command store).
+ *
+ * Today only `sessionId` is consumed. `actorId` is reserved for the
+ * future team-tier multi-user mode (north-star: every entity carries an
+ * actor id so coordination scales beyond single-user). Adding a new
+ * required field here would be a major bump; new optional fields ride
+ * on a minor.
+ */
+export type ClientToolHandlerAttachContext = {
+  /**
+   * Host correlation id for the session being spawned. Required —
+   * the provider stores it on its per-spawn slot so wire notifications
+   * can route back to the right host-side consumer.
+   */
+  sessionId: string
+  /**
+   * Actor identity placeholder for future multi-user / team-tier
+   * support. Today the host always passes `'self'` (or omits) since
+   * Jack runs single-user; future remote-agent flows will populate
+   * with `'user_xxx@team_yyy'` style strings.
+   */
+  actorId?: string
+}
+
+/**
  * Behaviour token the provider persists alongside each rule. Mirror of
  * Claude's `permissions.{allow,deny,ask}` arrays — providers with a
  * different vocabulary translate to/from this enum at their boundary.
@@ -624,17 +704,33 @@ export type PermissionBehavior = 'allow' | 'deny' | 'ask'
 export type PermissionSource = 'user' | 'userLocal' | 'project' | 'projectLocal'
 
 /**
- * One persisted rule as the provider stores it. `tool` + `pattern` are a
- * convenience parse — `raw` is the source of truth for round-trip writes
- * (remove/add use the raw string verbatim).
+ * Optional human-readable parse hint for {@link PermissionRule}. Providers
+ * whose rule grammar has a recognisable "tool" + "pattern" decomposition
+ * (Claude's `Bash(npm install)`, `Edit(*.ts)`) populate this so the UI can
+ * render two columns instead of a raw string. Providers with a different
+ * grammar (Codex `approval_policy` keyed by command prefix) leave it
+ * undefined; the UI falls back to displaying `raw`.
+ */
+export type PermissionRuleHumanReadable = {
+  /** Best-effort tool name extracted by the provider (e.g. `Bash`, `Edit`). */
+  tool?: string
+  /** Best-effort pattern extracted by the provider (the bit inside the parens, etc.). */
+  pattern?: string
+}
+
+/**
+ * One persisted rule as the provider stores it. `raw` is the only
+ * field guaranteed across providers — it's the source of truth for
+ * round-trip writes (remove/add use the raw string verbatim) and the
+ * fallback display when no parse hint is available. The
+ * `humanReadable` sidecar is a Claude-style ergonomic split that
+ * other providers may opt out of.
  */
 export type PermissionRule = {
-  /** Tool name (e.g. `Bash`, `Edit`, `mcp__figma__authenticate`). */
-  tool: string
-  /** Content inside the parens (the glob / pattern), or null if the rule has no parens. */
-  pattern: string | null
-  /** Original string as stored in the settings file — source of truth for round-trip writes. */
+  /** Original string as stored by the provider — source of truth for round-trip writes. */
   raw: string
+  /** Optional parse hint for two-column UI rendering. */
+  humanReadable?: PermissionRuleHumanReadable
 }
 
 export type PermissionsSourceBlock = {
@@ -687,12 +783,17 @@ export type InProcessMcpToolSpec = {
   name: string
   description: string
   /**
-   * Zod schema for the tool arguments. Providers that don't speak zod
-   * natively can call `.shape` to inspect fields. We keep zod here
-   * instead of JSON Schema because the host already uses it everywhere
-   * (one source of truth for tool shapes).
+   * Zod schema for the tool arguments — a `Record<fieldName, ZodType>`
+   * (zod's "shape" form, what `z.object(...)` accepts). Provider
+   * implementations consume it via the SDK helper of their choice
+   * (Claude wraps with `tool(name, desc, schema, handler)` from
+   * `@anthropic-ai/claude-agent-sdk`).
+   *
+   * `zod` is a peer dep of this SDK so consumer + provider type-check
+   * against the same instance. The host always produces zod; trying
+   * to stuff JSON Schema here would silently break Claude's wrapper.
    */
-  schema: Record<string, unknown>
+  schema: Record<string, ZodType>
   handler: (args: Record<string, unknown>) => Promise<{
     content: Array<{ type: 'text'; text: string }>
     isError?: boolean
