@@ -169,9 +169,35 @@ test('CapabilityMatrix exposes liveEffortSwitch (decoupled from liveModelSwitch)
     liveModelSwitch: true,
     liveEffortSwitch: false,
     livePermissionModeSwitch: false,
-    permissionGranularity: 'callback'
+    permissionGranularity: 'callback',
+    usage: false,
+    permissionModes: ['default']
   }
   assert.equal(caps.liveEffortSwitch, false)
+  assert.deepEqual(caps.permissionModes, ['default'])
+})
+
+test('CapabilityMatrix.permissionModes is provider-declared catalog', () => {
+  const claudeShape: CapabilityMatrix['permissionModes'] = [
+    'default',
+    'acceptEdits',
+    'plan',
+    'auto'
+  ]
+  const codexShape: CapabilityMatrix['permissionModes'] = [
+    'default',
+    'acceptEdits',
+    'bypassPermissions'
+  ]
+  // AgentPermissionMode is now open — providers can invent new strings
+  // without breaking the type.
+  const futureShape: CapabilityMatrix['permissionModes'] = [
+    'default',
+    'whatever-future-mode'
+  ]
+  assert.equal(claudeShape.length, 4)
+  assert.equal(codexShape.length, 3)
+  assert.equal(futureShape[1], 'whatever-future-mode')
 })
 
 test('permissionGranularity hybrid open union', () => {

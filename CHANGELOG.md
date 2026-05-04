@@ -2,6 +2,23 @@
 
 All notable changes to `@ottimis/jack-provider-sdk` will be documented in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] — 2026-05-03
+
+### Added
+
+Provider-declared permission-mode catalog. The renderer's Shift-Tab cycle no longer hardcodes the Claude shape with one-off filters per provider — each provider declares which modes it supports.
+
+- `CapabilityMatrix.permissionModes: readonly AgentPermissionMode[]` — provider lists supported modes in cycle order. Drives the renderer's Shift-Tab cycle and any provider-aware UI. Modes outside the catalog MAY still be accepted by `setPermissionMode()` (slash command, settings) — the catalog only governs UI affordances.
+- `AgentPermissionMode` widened to an open string union with `'auto'` and `'dontAsk'` added as known literals (was a closed union of `'default' | 'acceptEdits' | 'plan' | 'bypassPermissions'`). Existing literal types still satisfy the type — additive.
+
+In-tree provider declarations:
+
+- Claude: `['default', 'acceptEdits', 'plan', 'auto']`
+- Codex: `['default', 'acceptEdits', 'bypassPermissions']` — no `'plan'` because Codex has no `ExitPlanMode` primitive; mapping `'plan'` to read-only sandbox was a misleading shortcut.
+- Gemini: `['default', 'acceptEdits', 'plan', 'bypassPermissions']`
+
+No breaking changes — every field is additive.
+
 ## [0.3.0] — 2026-05-03
 
 ### Added

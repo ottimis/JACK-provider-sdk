@@ -45,12 +45,21 @@ export type BackendName = string
 // Neutral option types
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Permission gate behaviour. Strings the host may toggle live. */
+/**
+ * Permission gate behaviour. Open string union — providers declare which
+ * subset they support via {@link CapabilityMatrix.permissionModes}, and
+ * the host's permission-mode picker reads that catalog verbatim. Listed
+ * literals are the modes any in-tree provider has shipped to date;
+ * future providers may invent new strings without breaking the type.
+ */
 export type AgentPermissionMode =
   | 'default'
   | 'acceptEdits'
   | 'plan'
+  | 'auto'
   | 'bypassPermissions'
+  | 'dontAsk'
+  | (string & {})
 
 /** Settings layers the provider should consult at boot. */
 export type AgentSettingSource = 'user' | 'project' | 'local'

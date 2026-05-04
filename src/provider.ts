@@ -16,7 +16,7 @@
  * it free of provider-specific imports.
  */
 
-import type { AgentBackend, AgentQueryOptions, McpServerSpec } from './backend'
+import type { AgentBackend, AgentPermissionMode, AgentQueryOptions, McpServerSpec } from './backend'
 import type { UsageApi } from './usage'
 import type { ZodType } from 'zod'
 import type {
@@ -273,6 +273,24 @@ export type CapabilityMatrix = {
    * usage bars and no Connect affordance is offered.
    */
   usage: boolean
+  /**
+   * Permission modes the provider actually supports. Drives the
+   * Shift-Tab cycle in the renderer (`MessageInputBar`) and any
+   * provider-aware UI that picks a mode (settings, slash commands).
+   * Order matters — it's the cycle order on Shift-Tab.
+   *
+   * Each provider declares only the modes that have a meaningful
+   * behaviour for its runtime: Claude's `['default', 'acceptEdits',
+   * 'plan', 'auto']`, Codex's `['default', 'acceptEdits',
+   * 'bypassPermissions']` (no `'plan'` because there's no ExitPlanMode
+   * primitive — mapping `'plan'` to read-only sandbox would be
+   * misleading), Gemini's set inherited from ACP `available_modes`.
+   *
+   * Modes outside this list MAY still be accepted by
+   * `setPermissionMode()` (e.g. set programmatically via slash command
+   * or settings); the catalog only governs UI affordances.
+   */
+  permissionModes: readonly AgentPermissionMode[]
 }
 
 /**
