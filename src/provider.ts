@@ -17,6 +17,7 @@
  */
 
 import type { AgentBackend, AgentQueryOptions, McpServerSpec } from './backend'
+import type { UsageApi } from './usage'
 import type { ZodType } from 'zod'
 import type {
   ClientToolHandler,
@@ -265,6 +266,13 @@ export type CapabilityMatrix = {
    *     renderer hides it and only shows the post-fact audit log.
    */
   permissionGranularity: 'callback' | 'sandbox-only'
+  /**
+   * Provider exposes a usage / billing surface (account-level snapshot
+   * via `provider.usage.fetch()` and/or per-session metric translation
+   * via `formatSessionMetrics()`). When `false`, the chip hides the
+   * usage bars and no Connect affordance is offered.
+   */
+  usage: boolean
 }
 
 /**
@@ -642,6 +650,14 @@ export type JackProvider = {
    * leave it undefined and the host returns empty snapshots.
    */
   persistedPermissions?: PersistedPermissionsApi
+  /**
+   * Usage / billing capability — provider-owned data flow. See
+   * {@link UsageApi}. Optional; when undefined the chip degrades to
+   * showing nothing (and `capabilities.usage` MUST be `false`). The
+   * provider stays the single source of truth: host plumbs, never
+   * decodes.
+   */
+  usage?: UsageApi
 }
 
 /**

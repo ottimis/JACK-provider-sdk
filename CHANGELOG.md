@@ -2,6 +2,24 @@
 
 All notable changes to `@ottimis/jack-provider-sdk` will be documented in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] — 2026-05-03
+
+### Added
+
+Provider-owned usage / billing capability. Single source of truth model — host plumbs, never decodes.
+
+- `UsageApi` interface on `JackProvider.usage?` (optional). Two surfaces:
+  - `fetch()` for account-level snapshots (Claude cookie API for Pro/Max, OpenAI usage endpoints for Codex API key, Gemini Cloud Billing). Pulled by host poller on `recommendedPollIntervalSec` cadence.
+  - `formatSessionMetrics(raw: AgentContextUsage)` for per-session metric translation. The host's manager already calls `backend.getContextUsage()` after every assistant message; this hook lifts the loose bag into canonical `UsageMetric[]` without the host trying to interpret provider-specific fields.
+- `UsageMetric` discriminated union with three kinds:
+  - `time_window` — rolling utilization on a clock boundary (Claude 5h/7d, Gemini daily req quota). Optional `used` / `limit` / `unit` carry raw counts when the provider exposes them; Claude's cookie API leaves them undefined.
+  - `token_utilization` — count-based without time boundary (context window, lifetime tokens). Optional `max` for the no-cap analytics case.
+  - `monthly_spend` — $ spent on a billing cycle. Only meaningful for API-key auth; subscription users have rolling-window quotas instead.
+- `UsageStatus`, `UsageConnectResult`, `UsageConnectOption`, `UsageConnectContext`, `UsageSnapshot` types for the connect / status / fetch flow. The `'choose'` branch on `UsageConnectResult` covers multi-org / multi-project accounts (Claude's existing flow).
+- `CapabilityMatrix.usage: boolean` flag — host hides the chip's bars and Connect affordance when `false`. Providers MUST declare it; absence of `provider.usage` AND `capabilities.usage: false` are the two halves of the same gate.
+
+No breaking changes — every field is additive. In-tree providers without a usage surface set `usage: false` in their capability matrix and omit the `usage` key on the provider object; existing callers keep working.
+
 ## [0.2.0] — 2026-05-03
 
 ### Breaking

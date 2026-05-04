@@ -5,6 +5,7 @@ import * as sdk from '../src/index'
 import {
   localSpawner,
   type AgentBackend,
+  type AgentContextUsage,
   type AgentEffortLevel,
   type AgentForkSessionOptions,
   type AgentListSessionsOptions,
@@ -22,6 +23,7 @@ import {
   type JackProvider,
   type KnowledgeContext,
   type McpServerSpec,
+  type MonthlySpendMetric,
   type ParsedSlashEnvelope,
   type PermissionBehavior,
   type PermissionRule,
@@ -41,7 +43,16 @@ import {
   type SlashCommandScope,
   type SlashCommandSupport,
   type SpawnArgs,
-  type ToolDescriptor
+  type TimeWindowMetric,
+  type TokenUtilizationMetric,
+  type ToolDescriptor,
+  type UsageApi,
+  type UsageConnectContext,
+  type UsageConnectOption,
+  type UsageConnectResult,
+  type UsageMetric,
+  type UsageSnapshot,
+  type UsageStatus
 } from '../src/index'
 
 // Surface-level smoke: every named export the README/spec promises must
@@ -271,4 +282,147 @@ test('barrel exports a stable, documented set of names', () => {
   // mentioned in the README. Removing one would break consumers.
   const exportedRuntime = Object.keys(sdk).sort()
   assert.ok(exportedRuntime.includes('localSpawner'), 'localSpawner missing')
+})
+
+test('UsageMetric discriminates by kind', () => {
+  const tw: TimeWindowMetric = {
+    kind: 'time_window',
+    id: 'five_hour',
+    label: '5-hour usage',
+    utilization: 0.42,
+    resetsAt: '2026-05-03T18:00:00Z',
+    windowSeconds: 18000
+  }
+  const twWithCount: TimeWindowMetric = {
+    kind: 'time_window',
+    id: 'daily',
+    label: 'Daily quota',
+    utilization: 0.24,
+    used: 12,
+    limit: 50,
+    unit: 'requests',
+    resetsAt: '2026-05-04T00:00:00Z',
+    windowSeconds: 86400
+  }
+  const tu: TokenUtilizationMetric = {
+    kind: 'token_utilization',
+    id: 'context',
+    label: 'Context',
+    used: 23456,
+    max: 200000
+  }
+  const ms: MonthlySpendMetric = {
+    kind: 'monthly_spend',
+    id: 'may-2026',
+    label: 'May 2026',
+    spentUsd: 12.34,
+    cycleStart: '2026-05-01T00:00:00Z',
+    cycleEnd: '2026-05-31T23:59:59Z'
+  }
+  const all: UsageMetric[] = [tw, twWithCount, tu, ms]
+  // Narrow on `kind` to verify the union shape.
+  for (const m of all) {
+    if (m.kind === 'time_window') assert.equal(typeof m.utilization, 'number')
+    else if (m.kind === 'token_utilization') assert.equal(typeof m.used, 'number')
+    else assert.equal(typeof m.spentUsd, 'number')
+  }
+})
+
+test('UsageSnapshot allows empty metrics + verbatim raw passthrough', () => {
+  const empty: UsageSnapshot = {
+    metrics: [],
+    observedAt: '2026-05-03T12:00:00Z'
+  }
+  const withRaw: UsageSnapshot = {
+    metrics: [],
+    observedAt: '2026-05-03T12:00:00Z',
+    raw: { upstream: 'verbatim payload here' }
+  }
+  assert.equal(empty.metrics.length, 0)
+  assert.deepEqual(withRaw.raw, { upstream: 'verbatim payload here' })
+})
+
+test('UsageConnectResult discriminates ready / choose / error / cancelled', () => {
+  const ready: UsageConnectResult = { kind: 'ready', identity: 'mm@ottimis.com' }
+  const choose: UsageConnectResult = {
+    kind: 'choose',
+    options: [{ id: 'org-a', label: 'Acme' }, { id: 'org-b', label: 'Beta' }]
+  }
+  const err: UsageConnectResult = { kind: 'error', error: 'cookie missing' }
+  const cancel: UsageConnectResult = { kind: 'cancelled' }
+  const opt: UsageConnectOption = { id: 'opt', label: 'Opt' }
+  const ctx: UsageConnectContext = { parentWindow: undefined }
+  assert.deepEqual([ready.kind, choose.kind, err.kind, cancel.kind], [
+    'ready', 'choose', 'error', 'cancelled'
+  ])
+  assert.equal(opt.label, 'Opt')
+  assert.equal(ctx.parentWindow, undefined)
+})
+
+test('UsageStatus carries identity + authMode hints', () => {
+  const status: UsageStatus = {
+    connected: true,
+    identity: 'mm@ottimis.com',
+    authMode: 'subscription'
+  }
+  const future: UsageStatus = {
+    connected: true,
+    authMode: 'whatever-future-mode'
+  }
+  assert.equal(status.authMode, 'subscription')
+  assert.equal(future.authMode, 'whatever-future-mode')
+})
+
+test('UsageApi accepts a minimal pure-format-only implementation', () => {
+  const api: UsageApi = {
+    status: async () => ({ connected: false }),
+    connect: async () => ({ kind: 'cancelled' as const }),
+    disconnect: async () => {},
+    fetch: async () => ({ metrics: [], observedAt: new Date().toISOString() }),
+    formatSessionMetrics: (raw: AgentContextUsage): UsageMetric[] => {
+      const total = typeof raw.totalTokens === 'number' ? raw.totalTokens : 0
+      const max = typeof raw.maxTokens === 'number' ? raw.maxTokens : undefined
+      return [{ kind: 'token_utilization', id: 'context', label: 'Context', used: total, max }]
+    }
+  }
+  // Compile-time only — calling status() would just return the dummy.
+  assert.equal(typeof api.status, 'function')
+  assert.equal(typeof api.formatSessionMetrics, 'function')
+})
+
+test('CapabilityMatrix declares the new usage flag', () => {
+  const off: CapabilityMatrix = {
+    partialMessages: false,
+    hooks: { PreToolUse: false, PostToolUse: false },
+    planMode: false,
+    askUserQuestion: false,
+    subagents: 'none',
+    mcp: false,
+    structuredPatch: false,
+    resumeSession: false,
+    liveModelSwitch: false,
+    liveEffortSwitch: false,
+    livePermissionModeSwitch: false,
+    permissionGranularity: 'callback',
+    usage: false
+  }
+  assert.equal(off.usage, false)
+})
+
+test('JackProvider.usage is optional', () => {
+  const noUsage: JackProvider = {
+    id: 'no-usage',
+    label: 'NoUsage',
+    detect: async () => ({ installed: true }),
+    backends: [],
+    defaultBackendId: 'sdk',
+    capabilities: {} as CapabilityMatrix,
+    modelDefaults: { oneShot: 'cheap-model' },
+    toolCatalog: [],
+    parseToolName: (rawName) => ({ kind: 'native', toolName: rawName }),
+    applyKnowledgeContext: () => {},
+    readSessionTranscript: async () => []
+    // no `usage` field — host hides chip Connect affordance
+  }
+  assert.equal(noUsage.usage, undefined)
 })

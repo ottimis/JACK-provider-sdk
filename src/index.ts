@@ -24,6 +24,7 @@
 export * from './backend'
 export * from './spawner'
 export * from './provider'
+export * from './usage'
 
 /**
  * Re-export of `NormalizedMessage` from chat-core so consumers don't need
