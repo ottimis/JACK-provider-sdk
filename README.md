@@ -41,7 +41,9 @@ export const myProvider: JackProvider = {
 }
 ```
 
-Full contract documented in the consumer repo: [`docs/provider-package-spec.md`](https://github.com/ottimis/JACK/blob/main/docs/provider-package-spec.md).
+Step-by-step walkthrough (Pattern A vs Pattern B, capability matrix, knowledge context, gotchas): [`docs/implementing-a-provider.md`](./docs/implementing-a-provider.md).
+
+Full host-side contract: [`docs/provider-package-spec.md`](https://github.com/ottimis/JACK/blob/main/docs/provider-package-spec.md) in the consumer repo.
 
 ## Versioning
 

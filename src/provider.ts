@@ -17,6 +17,7 @@
  */
 
 import type { AgentBackend, AgentPermissionMode, AgentQueryOptions, McpServerSpec } from './backend'
+import type { HostServices } from './host'
 import type { UsageApi } from './usage'
 import type { ZodType } from 'zod'
 import type {
@@ -676,6 +677,27 @@ export type JackProvider = {
    * decodes.
    */
   usage?: UsageApi
+  /**
+   * Optional one-shot activation hook. Called once by the host during
+   * registration with a {@link HostServices} bag scoped to this
+   * provider's id (kv namespace, auth partition prefix). Providers that
+   * need host-side primitives (encrypted credential storage, child auth
+   * windows, …) store the `host` reference and use it lazily; providers
+   * that are pure (Codex, Gemini today) leave this undefined.
+   *
+   * Activation MUST be idempotent: calling `activate(host)` twice with
+   * the same host is allowed and should not duplicate state. Activation
+   * happens at registration time — well before any session spawns —
+   * but providers MUST NOT block on network or disk here. Defer all I/O
+   * to the methods that actually need it.
+   *
+   * The host calls `activate` synchronously enough that
+   * `provider.usage`, `provider.persistedPermissions`, etc. can read
+   * `host` from a closure / captured variable in subsequent invocations.
+   * Async work inside `activate` is OK but the host won't await it
+   * before exposing the provider — it's "fire and let it complete".
+   */
+  activate?(host: HostServices): void | Promise<void>
 }
 
 /**
