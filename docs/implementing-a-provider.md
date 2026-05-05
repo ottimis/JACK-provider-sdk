@@ -1,31 +1,31 @@
-# Implementare un nuovo provider
+# Implementing a new provider
 
-Guida task-oriented per aggiungere un nuovo `JackProvider` (in-tree o come pacchetto esterno `jack-<name>`). Riferimento ai tipi: vedi i JSDoc in `src/provider.ts`, `src/backend.ts`, `src/spawner.ts`, `src/host.ts`, `src/usage.ts`. Spec del contratto a livello host: [`docs/provider-package-spec.md`](https://github.com/ottimis/JACK/blob/main/docs/provider-package-spec.md) nel repo JACK.
+Task-oriented guide for adding a new `JackProvider` (in-tree or as an external `jack-<name>` package). Type reference: see the JSDoc in `src/provider.ts`, `src/backend.ts`, `src/spawner.ts`, `src/host.ts`, `src/usage.ts`. Host-side contract spec: [`docs/provider-package-spec.md`](https://github.com/ottimis/JACK/blob/main/docs/provider-package-spec.md) in the JACK repo.
 
-Questa guida copre il **come**: cosa serve, in che ordine, quali scelte non sono ovvie.
+This guide covers the **how**: what's needed, in what order, and which choices are non-obvious.
 
 ---
 
-## 1. Decidere il pattern
+## 1. Choose the integration pattern
 
-Prima di scrivere una riga di codice, scegli il pattern di integrazione. Influenza quasi tutto il resto.
+Before writing a single line, pick the integration pattern. It drives almost every other decision.
 
-| Pattern | Esempi | Caratteristica chiave | Cosa implementi |
+| Pattern | Examples | Key trait | What you implement |
 |---|---|---|---|
-| **A — Provider-driven** | Claude (SDK/CLI), Codex | Il provider emette messaggi e *chiede* eventuali tool al host quando serve | Backend traduce wire ↔ `NormalizedMessage`. Tool fs/terminal sono interni al provider. |
-| **B — Host-driven (ACP)** | Gemini (ACP) | Il provider chiede al host di eseguire fs/terminal/tool via JSON-RPC | Backend traduce wire ↔ `NormalizedMessage` **e** implementi `attachClientToolHandler` per ricevere l'handler iniettato dal host. |
+| **A — Provider-driven** | Claude (SDK/CLI), Codex | The provider emits messages and *requests* tools from the host when needed | Backend translates wire ↔ `NormalizedMessage`. fs/terminal tools live inside the provider. |
+| **B — Host-driven (ACP)** | Gemini (ACP) | The provider asks the host to execute fs/terminal/tools over JSON-RPC | Backend translates wire ↔ `NormalizedMessage` **and** you implement `attachClientToolHandler` to receive the host-injected handler. |
 
-Regola: se la runtime AI espone un protocollo dove *lui* invoca read/write/exec sul client (ACP, MCP-style outward), sei in Pattern B. Altrimenti A.
+Rule of thumb: if the AI runtime exposes a protocol where *it* invokes read/write/exec on the client (ACP, MCP-style outward), you're in Pattern B. Otherwise A.
 
 ---
 
-## 2. Setup del pacchetto
+## 2. Package setup
 
-### Opzione in-tree
+### In-tree option
 
-Crea `providers/<name>/` nel monorepo JACK e dichiara il workspace nel `pnpm-workspace.yaml`. Niente da pubblicare.
+Create `providers/<name>/` inside the JACK monorepo and declare the workspace in `pnpm-workspace.yaml`. Nothing to publish.
 
-### Opzione esterna (`jack-<name>` su npm)
+### External option (`jack-<name>` on npm)
 
 ```jsonc
 // package.json
@@ -43,17 +43,17 @@ Crea `providers/<name>/` nel monorepo JACK e dichiara il workspace nel `pnpm-wor
 }
 ```
 
-`zod` è peer dep perché lo schema `InProcessMcpToolSpec.schema` deve type-checkare sulla stessa istanza del host. `@ottimis/jack-chat-core` è peer perché tipi come `NormalizedMessage` viaggiano per riferimento.
+`zod` is a peer dep because `InProcessMcpToolSpec.schema` must type-check against the same instance the host uses. `@ottimis/jack-chat-core` is a peer because types like `NormalizedMessage` travel by reference.
 
-Build dual ESM+CJS come fa lo SDK stesso (vedi `package.json` di questo repo per i tre script `build`/`tsc`/`tsc -p tsconfig.cjs.json`).
+Build dual ESM+CJS the same way the SDK does (see this repo's `package.json` for the three `build`/`tsc`/`tsc -p tsconfig.cjs.json` scripts).
 
 ---
 
-## 3. Checklist di implementazione
+## 3. Implementation checklist
 
-Compila **in quest'ordine** — ogni step assume che i precedenti siano già definiti.
+Fill in **in this order** — each step assumes the previous ones are already defined.
 
-### 3.1 `detect()` — il primo step utile
+### 3.1 `detect()` — the first useful step
 
 ```ts
 async detect(): Promise<ProviderDetectResult> {
@@ -61,7 +61,7 @@ async detect(): Promise<ProviderDetectResult> {
   if (!path) {
     return {
       installed: false,
-      reason: 'myagent CLI non trovata nel PATH',
+      reason: 'myagent CLI not found in PATH',
       installCommand: 'npm install -g @vendor/myagent',
       docsUrl: 'https://docs.example.com/install'
     }
@@ -70,79 +70,79 @@ async detect(): Promise<ProviderDetectResult> {
   return {
     installed: true,
     authenticated: authed,
-    authReason: authed ? undefined : 'Credenziali scadute',
+    authReason: authed ? undefined : 'Credentials expired',
     signInCommand: 'myagent login'
   }
 }
 ```
 
-**Tre stati di `authenticated`**: `true` / `false` / omesso. Ometti se il provider non modella auth (es. SDK self-contained). `false` solo se distinguibile da `true` con un check rapido — non bloccare lo start.
+**Three states for `authenticated`**: `true` / `false` / omitted. Omit it when the provider doesn't model auth (e.g. self-contained SDK). Use `false` only when you can distinguish it from `true` with a quick check — never block startup on a slow probe.
 
 ### 3.2 `BackendDescriptor` + `AgentBackend`
 
-Un backend = una implementazione del wire-protocol. La maggior parte dei provider ne ha uno solo.
+One backend = one wire-protocol implementation. Most providers ship a single one.
 
 ```ts
 const myBackend: AgentBackend = {
   name: 'sdk',
   query(input) {
-    // 1. Spawn (usa input.options.spawner ?? localSpawner — MAI child_process.spawn diretto)
-    // 2. Wrappa in AgentSession con AsyncIterable<NormalizedMessage>
-    // 3. Traduci wire → NormalizedMessage on-the-fly
-    // 4. Esponi interrupt/close/getContextUsage/setPermissionMode/setModel/setEffortLevel/getSettings
+    // 1. Spawn (use input.options.spawner ?? localSpawner — NEVER child_process.spawn directly)
+    // 2. Wrap in an AgentSession exposing AsyncIterable<NormalizedMessage>
+    // 3. Translate wire → NormalizedMessage on-the-fly
+    // 4. Expose interrupt/close/getContextUsage/setPermissionMode/setModel/setEffortLevel/getSettings
     return session
   },
-  listSessions: async (opts) => { /* leggi i transcript on-disk */ },
-  renameSession: async (id, title) => { /* persisti */ },
-  forkSession: async (id, opts) => { /* duplica con cutoff */ }
+  listSessions: async (opts) => { /* read on-disk transcripts */ },
+  renameSession: async (id, title) => { /* persist title */ },
+  forkSession: async (id, opts) => { /* duplicate with optional cutoff */ }
 }
 ```
 
-**Punti che si dimenticano sempre**:
-- Usa `input.options.spawner` se presente — è il host che lo passa per sandbox Docker. Hardcodare `child_process.spawn` rompe la sandboxing.
-- `NormalizedMessage.raw` deve essere lossless. Non normalizzare via.
-- `getContextUsage()` può tornare un bag loose; il chip lo lifta via `provider.usage.formatSessionMetrics`.
-- `setEffortLevel` e `setModel` accettano `undefined` per "reset al default".
-- `listSessions` ordina per `lastModified` desc tipicamente, ma non è imposto — documenta cosa fai.
+**Common mistakes worth flagging**:
+- Use `input.options.spawner` if present — that's the host injecting a Docker spawner for sandboxed sessions. Hardcoding `child_process.spawn` breaks sandboxing.
+- `NormalizedMessage.raw` must be lossless. Don't normalize it away.
+- `getContextUsage()` may return a loose bag; the chip lifts it through `provider.usage.formatSessionMetrics`.
+- `setEffortLevel` and `setModel` accept `undefined` to mean "reset to default".
+- `listSessions` typically sorts by `lastModified` desc, but it's not enforced — document your choice.
 
-### 3.3 `CapabilityMatrix` — dichiarare onesto
+### 3.3 `CapabilityMatrix` — be honest
 
-Vedi i JSDoc di `CapabilityMatrix` per la lista completa. **La regola d'oro**: dichiarare aspirazionalmente produce UI rotta. Se non hai `ExitPlanMode` nativo, `planMode: false` — non includere `'plan'` in `permissionModes`.
+See the JSDoc on `CapabilityMatrix` for the full list. **Golden rule**: aspirational declarations produce broken UI. If you don't have a native `ExitPlanMode` primitive, set `planMode: false` — and don't include `'plan'` in `permissionModes`.
 
 ```ts
 capabilities: {
-  partialMessages: true,        // streaming token-by-token
+  partialMessages: true,        // token-by-token streaming
   hooks: { PreToolUse: true, PostToolUse: true },
-  planMode: false,              // niente ExitPlanMode primitive
+  planMode: false,              // no ExitPlanMode primitive
   askUserQuestion: false,
   subagents: 'none',            // 'native' | 'polyfill' | 'none'
   mcp: true,
-  structuredPatch: false,       // solo Claude oggi
+  structuredPatch: false,       // Claude-only today
   resumeSession: true,
   liveModelSwitch: true,
-  liveEffortSwitch: false,      // se l'effort è solo spawn-time
+  liveEffortSwitch: false,      // when effort is spawn-time only
   livePermissionModeSwitch: true,
   permissionGranularity: 'callback', // 'callback' | 'sandbox-only'
-  usage: false,                 // true solo se implementi UsageApi
+  usage: false,                 // true only if you implement UsageApi
   permissionModes: ['default', 'acceptEdits', 'bypassPermissions']
 }
 ```
 
-**Override per backend**: se hai più backend con feature set differenti (caso Gemini stream-json vs ACP), dichiari l'**LCD** a livello provider e gli override nel `BackendDescriptor.capabilities`. Pattern A con backend wire-identici (Claude SDK e CLI) lascia `capabilities` undefined nel descriptor.
+**Per-backend overrides**: if you ship multiple backends with different feature sets (Gemini stream-json vs ACP), declare the **lowest common denominator** at provider level and override deltas in `BackendDescriptor.capabilities`. Pattern A providers with wire-identical backends (Claude SDK and CLI) leave the descriptor's `capabilities` undefined.
 
 ### 3.4 `toolCatalog` + `parseToolName`
 
-Il renderer ha tre tipi di card: bespoke, schema, generic.
+The renderer has three card types: bespoke, schema, generic.
 
 ```ts
 toolCatalog: [
   { providerToolName: 'apply_patch', shape: 'fs.edit', cardStyle: 'bespoke' },
   { providerToolName: 'shell',       shape: 'terminal',  cardStyle: 'bespoke' },
-  // tool MCP sono dinamici → NON elencarli qui
+  // MCP tools are dynamic → DO NOT list them here
 ]
 ```
 
-`parseToolName` discrimina nativi vs MCP. Convenzione di Claude `mcp__<slug>__<tool>`; altri provider dichiarano la propria:
+`parseToolName` discriminates native vs MCP. Claude's convention is `mcp__<slug>__<tool>`; other providers declare their own:
 
 ```ts
 parseToolName(raw) {
@@ -154,64 +154,64 @@ parseToolName(raw) {
 }
 ```
 
-### 3.5 `applyKnowledgeContext` — fold del contesto neutro
+### 3.5 `applyKnowledgeContext` — fold the neutral context
 
-Il host fonde workspace context + AgentDefinition knowledge + override → un `KnowledgeContext` solo. Tu lo pieghi nel formato nativo:
+The host merges workspace context + AgentDefinition knowledge + per-instance overrides into one `KnowledgeContext`. You fold it into the native shape:
 
 ```ts
 applyKnowledgeContext(ctx, options) {
-  // systemPromptAppend → option SDK del provider
+  // systemPromptAppend → the provider's SDK option
   options.systemPrompt = { type: 'preset', preset: 'default', append: ctx.systemPromptAppend }
-  // directories → quello che il provider chiama "additional roots", o sandbox mounts
+  // directories → whatever the provider calls "additional roots", or sandbox mounts
   options.additionalDirectories = ctx.directories
-  // mcpServers → mappa o file di config
+  // mcpServers → map or config file
   options.mcpServers = ctx.mcpServers
 }
 ```
 
-Se il provider usa un file TOML invece di opzioni runtime (caso Codex), scrivi il file da `prepareSpawnOptions` e qui non fai nulla — ma lascia il metodo presente per non far crashare il host.
+If your provider uses a TOML config file instead of runtime options (Codex case), write the file from `prepareSpawnOptions` and leave this method essentially empty — but keep it defined so the host doesn't crash.
 
-### 3.6 `readSessionTranscript` — replay on-disk
+### 3.6 `readSessionTranscript` — on-disk replay
 
-Sostituisce le call dirette al SDK del provider sparse nel host (indexer, mobile, IPC, suggester). Contratto:
+Replaces direct calls to the provider's SDK that used to be sprinkled across the host (indexer, mobile, IPC, name suggester). Contract:
 
-- Ritorna **cronologico** (oldest first).
-- Popola `messageId` quando la sorgente lo espone.
-- Preserva `raw` verbatim.
-- Empty array per sessioni senza transcript.
+- Return rows in **chronological order** (oldest first).
+- Populate `messageId` whenever the source exposes one.
+- Preserve `raw` verbatim.
+- Return an empty array for sessions without a transcript.
 
-### 3.7 (Opzionali) il resto
+### 3.7 (Optional) the rest
 
-| Metodo | Quando lo implementi |
+| Method | Implement when |
 |---|---|
-| `prepareSpawnOptions` | Hai bisogno di scrivere `providerSpawnHints` per build packaged (es. asar-unpacked path). |
-| `attachInProcessMcpServer` | Il SDK del provider supporta MCP in-process (Claude `createSdkMcpServer`). Se no, omettilo: il host degrada — pair-mode reviewers non ottengono i tool Jack. |
-| `attachClientToolHandler` | **Pattern B only.** Il host ti inietta l'handler all'inizio della session. Salvi il riferimento e lo usi quando ricevi richieste fs/terminal/tools dal wire. |
-| `slashCommands` | Hai una UX `/command`. Discrimina `builtins` / `scanCommands` / `subscribeToWireCommands` / `parseEnvelope`. |
-| `persistedPermissions` | Persisti regole di permesso su disco (Claude `.claude/settings*.json`). Sandbox-only models (Codex) lasciano undefined. |
-| `usage` | Hai un endpoint billing/quotas. Vedi `src/usage.ts` per `UsageApi`. La capability `usage` deve riflettere la presenza di questo campo. |
-| `activate(host)` | Hai bisogno di KV storage o auth flows. Il host ti passa `HostServices` namespacati per provider. **Idempotente** — `activate` può essere chiamato due volte. |
-| `policies` | Hai regole non-banali su come il host deve trattare il content (sanitization user content, etc.). |
+| `prepareSpawnOptions` | You need to write `providerSpawnHints` for packaged builds (e.g. asar-unpacked path). |
+| `attachInProcessMcpServer` | Your SDK supports in-process MCP (Claude `createSdkMcpServer`). If not, omit it: the host degrades — pair-mode reviewers don't get Jack's tools. |
+| `attachClientToolHandler` | **Pattern B only.** The host injects the handler at session start. Store the reference and use it when wire requests arrive for fs/terminal/tools. |
+| `slashCommands` | You have a `/command` UX. Discriminate `builtins` / `scanCommands` / `subscribeToWireCommands` / `parseEnvelope`. |
+| `persistedPermissions` | You persist permission rules on disk (Claude's `.claude/settings*.json`). Sandbox-only models (Codex) leave it undefined. |
+| `usage` | You have a billing/quota endpoint. See `src/usage.ts` for `UsageApi`. The `usage` capability flag must reflect whether this field is present. |
+| `activate(host)` | You need KV storage or auth flows. The host hands you `HostServices`, namespaced per provider. **Idempotent** — `activate` may be called twice. |
+| `policies` | You have non-trivial rules about how the host should treat your content (user-content sanitization, etc.). |
 
 ### 3.8 `modelDefaults` + `branding` + `modelOptions` / `effortLevels`
 
 ```ts
-modelDefaults: { oneShot: 'myagent-fast' },  // model più economico, deve essere SEMPRE disponibile
+modelDefaults: { oneShot: 'myagent-fast' },  // cheapest model, MUST be available on every account
 branding: { accentColor: '#ff6b6b', iconKey: 'sparkles' },
 modelOptions: [
   { value: 'myagent-pro', label: 'Pro' },
   { value: 'myagent-fast', label: 'Fast' }
 ],
-effortLevels: ['low', 'medium', 'high']  // solo se liveEffortSwitch: true
+effortLevels: ['low', 'medium', 'high']  // only when liveEffortSwitch: true
 ```
 
-`oneShot` serve al host per task-cheap (suggester di nomi sessione, agent-def hints). Non hardcodare un model che richiede tier alti.
+`oneShot` is what the host uses for cheap one-shot tasks (session-name suggester, agent-def hints). Don't hardcode a model that requires premium tiers.
 
 ---
 
-## 4. Esempio minimo — Pattern A
+## 4. Minimal example — Pattern A
 
-Provider che lancia un CLI e parsa stream-json.
+A provider that spawns a CLI and parses stream-json.
 
 ```ts
 // src/index.ts
@@ -239,7 +239,7 @@ const myBackend: AgentBackend = {
     if (typeof prompt === 'string') {
       proc.stdin.write(JSON.stringify({ type: 'user', text: prompt }) + '\n')
     } else {
-      // AsyncIterable: pump verso stdin
+      // AsyncIterable: pump into stdin
       ;(async () => {
         for await (const turn of prompt) {
           proc.stdin.write(JSON.stringify({ type: 'user', text: turn }) + '\n')
@@ -251,16 +251,16 @@ const myBackend: AgentBackend = {
       [Symbol.asyncIterator]: async function* () {
         for await (const line of readLines(proc.stdout)) {
           const wire = JSON.parse(line)
-          yield translateToNormalized(wire) // tua mappatura
+          yield translateToNormalized(wire) // your mapping
         }
       },
       async interrupt() { proc.kill('SIGINT') },
       close() { controller.abort() },
       async getContextUsage() { return { totalTokens: 0 } },
-      async stopTask() { /* no-op se il provider non distingue task */ },
+      async stopTask() { /* no-op when the provider doesn't separate tasks */ },
       async setPermissionMode(mode) { sendControl(proc, 'set_mode', { mode }) },
       async setModel(model) { sendControl(proc, 'set_model', { model }) },
-      async setEffortLevel(effort) { /* throw 'UNSUPPORTED' se non hai live switch */ },
+      async setEffortLevel(effort) { /* throw 'UNSUPPORTED' if you don't have live switching */ },
       async getSettings() { return { effective: {}, sources: {} } }
     }
     return session
@@ -314,9 +314,9 @@ export const myProvider: JackProvider = {
 
 ---
 
-## 5. Esempio minimo — Pattern B (ACP)
+## 5. Minimal example — Pattern B (ACP)
 
-Provider che parla JSON-RPC bidirezionale: l'agente chiede al host fs/terminal/tools.
+A provider that speaks bidirectional JSON-RPC: the agent asks the host for fs/terminal/tools.
 
 ```ts
 import type {
@@ -326,26 +326,26 @@ import type {
   ClientToolHandlerAttachContext
 } from '@ottimis/jack-provider-sdk'
 
-// Slot per spawn: il host inietta l'handler PRIMA della query.
+// Per-spawn slot: the host injects the handler BEFORE query.
 const handlerSlot = new Map<string, ClientToolHandler>()
 
 const myAcpBackend: AgentBackend = {
   name: 'acp',
   query({ prompt, options }) {
-    // ... spawn del processo + JSON-RPC peer
+    // ... spawn the process + JSON-RPC peer
     rpc.handle('fs/read_text_file', async (params) => {
       const handler = handlerSlot.get(currentSessionId)
-      if (!handler) throw new Error('handler non collegato')
+      if (!handler) throw new Error('handler not attached')
       return handler.fs.readTextFile(params.path)
     })
     rpc.handle('terminal/create', async (params) => {
       const handler = handlerSlot.get(currentSessionId)
       return handler!.terminal.create(params)
     })
-    // ... resto del wiring
+    // ... rest of the wiring
     return session
   },
-  // listSessions / renameSession / forkSession come sopra
+  // listSessions / renameSession / forkSession as above
 }
 
 export const myAcpProvider: JackProvider = {
@@ -368,43 +368,43 @@ export const myAcpProvider: JackProvider = {
 }
 ```
 
-L'handler (`fs.readTextFile`, `fs.writeTextFile`, `terminal.create`, `tools.invoke`, ...) è iniettato dal host. Tu ricevi le richieste sul wire e le ruoti tramite l'handler. Quando la session si chiude, ripulisci lo slot.
+The handler (`fs.readTextFile`, `fs.writeTextFile`, `terminal.create`, `tools.invoke`, …) is injected by the host. You receive wire requests and route them through the handler. Clear the slot when the session closes.
 
 ---
 
-## 6. Versionamento e compatibilità
+## 6. Versioning and compatibility
 
-- **Minor**: campi opzionali aggiunti a `JackProvider` / `CapabilityMatrix` / `ToolShape`. Niente da fare lato provider.
-- **Major**: rinomi/restrutturazioni. Aggiorna il pin del peer `@ottimis/jack-provider-sdk` nel tuo `package.json` e l'eventuale codice di adattamento.
-- Il host dichiara la versione minima supportata. Il loader rifiuta pacchetti il cui range non soddisfa.
+- **Minor** bumps add optional fields to `JackProvider` / `CapabilityMatrix` / `ToolShape`. Nothing to do on the provider side.
+- **Major** bumps rename or restructure required fields. Update the `@ottimis/jack-provider-sdk` peer-dep range in your `package.json` and any adapter code.
+- The host declares the minimum supported SDK version. The plugin loader rejects packages whose range doesn't satisfy it.
 
-Pin il peer dep con un range conservativo (`>=0.5.0 <0.6.0`) finché non hai testato la versione successiva.
-
----
-
-## 7. Checklist finale
-
-Prima di pubblicare / mergiare:
-
-- [ ] `pnpm typecheck` pulito contro la versione di SDK target.
-- [ ] `detect()` testata sui tre stati (installed=true/auth=true, installed=true/auth=false, installed=false).
-- [ ] `CapabilityMatrix` riflette **fedelmente** ciò che il backend supporta — niente `true` aspirazionali.
-- [ ] `permissionModes` contiene solo modi che `setPermissionMode` accetta senza throwing.
-- [ ] `toolCatalog` copre i tool con card bespoke; gli altri cadono sul generico.
-- [ ] `applyKnowledgeContext` è idempotente e non rompe se `mcpServers` è vuoto.
-- [ ] `readSessionTranscript` ritorna in ordine cronologico, con `raw` lossless.
-- [ ] Per Pattern B: l'handler è collegato **prima** della prima request wire (no race).
-- [ ] `modelDefaults.oneShot` è disponibile su ogni account in cui il provider funziona.
-- [ ] Build dual ESM+CJS produce `dist/` e `dist/cjs/` con `.d.ts`.
-- [ ] (Esterno) `peerDependencies` pinnati su range compatibili.
+Pin the peer dep with a conservative range (`>=0.5.0 <0.6.0`) until you've tested against the next version.
 
 ---
 
-## 8. Cosa NON fare
+## 7. Final checklist
 
-- **Non importare moduli host-internal** (`electron`, `better-sqlite3`, IPC del host). Tutto ciò che ti serve dal host arriva via `activate(host: HostServices)`.
-- **Non leakare tipi nativi del SDK del provider** oltre il backend. Il host deve vedere solo `NormalizedMessage` & co.
-- **Non dichiarare capability che non funzionano**. Il renderer mostrerà UI morta.
-- **Non hardcodare `child_process.spawn`** — passa per `options.spawner`.
-- **Non mutare `NormalizedMessage.raw`**. Serve per debug e per re-render lossless.
-- **Non blockare in `activate`** su rete o disco. È fire-and-forget — fai il lavoro lazy nei metodi.
+Before publishing / merging:
+
+- [ ] `pnpm typecheck` clean against the target SDK version.
+- [ ] `detect()` exercised across the three states (installed=true/auth=true, installed=true/auth=false, installed=false).
+- [ ] `CapabilityMatrix` reflects **honestly** what the backend supports — no aspirational `true`s.
+- [ ] `permissionModes` only contains modes that `setPermissionMode` accepts without throwing.
+- [ ] `toolCatalog` covers tools with bespoke cards; the rest fall back to the generic renderer.
+- [ ] `applyKnowledgeContext` is idempotent and doesn't break when `mcpServers` is empty.
+- [ ] `readSessionTranscript` returns chronological order with `raw` lossless.
+- [ ] For Pattern B: the handler is attached **before** the first wire request (no race).
+- [ ] `modelDefaults.oneShot` is available on every account where the provider works.
+- [ ] Dual ESM+CJS build produces `dist/` and `dist/cjs/` with `.d.ts` files.
+- [ ] (External) `peerDependencies` pinned to compatible ranges.
+
+---
+
+## 8. What NOT to do
+
+- **Do not import host-internal modules** (`electron`, `better-sqlite3`, host IPC). Whatever you need from the host arrives via `activate(host: HostServices)`.
+- **Do not leak provider-native SDK types** past the backend boundary. The host should only see `NormalizedMessage` and friends.
+- **Do not declare capabilities you can't honor**. The renderer will show dead UI affordances.
+- **Do not hardcode `child_process.spawn`** — go through `options.spawner`.
+- **Do not mutate `NormalizedMessage.raw`**. It's needed for debug and for lossless re-rendering.
+- **Do not block in `activate`** on network or disk. It's fire-and-forget — defer the work to the methods that actually need it.
