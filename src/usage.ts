@@ -180,32 +180,60 @@ export type UsageConnectContext = {
  * Provider-owned usage capability. Optional on {@link JackProvider};
  * absent = host hides the chip's "Connect" affordance and the
  * capability flag is `false`.
+ *
+ * Multi-profile contract (SDK 0.7.0):
+ * Every account-level method accepts an optional `profileId`. Providers
+ * that ALSO declare `capabilities.profiles=true` MUST honor the param —
+ * different profile = different account = different credentials, polled
+ * independently. When omitted, the provider resolves to its DEFAULT
+ * profile (back-compat with hosts that don't yet thread profileId).
+ *
+ * Providers without profiles support (`capabilities.profiles=false`)
+ * MAY ignore the param and behave as if every call were singleton —
+ * the omission stays the canonical caller behavior, the param is just
+ * ignored.
+ *
+ * `formatSessionMetrics` stays profile-agnostic: per-session metrics
+ * derive from the live process's context tokens (already pinned to the
+ * session's profile via `applyProfile` at spawn time).
  */
 export type UsageApi = {
-  /** Current connection state — used for chip display + gating. */
-  status(): Promise<UsageStatus>
+  /**
+   * Current connection state — used for chip display + gating.
+   * Profile-aware: omit `profileId` to query the default profile.
+   */
+  status(profileId?: string): Promise<UsageStatus>
 
   /**
    * Open the provider's connect flow. Whatever modality the provider
    * needs (login window, API-key picker, OAuth redirect) lives here.
+   * Profile-aware: omit `profileId` to bind credentials to the default
+   * profile. Different profileIds use isolated storage AND isolated
+   * login surfaces (e.g. distinct cookie partitions for Claude) so two
+   * accounts can sign in side by side.
    */
-  connect(ctx: UsageConnectContext): Promise<UsageConnectResult>
+  connect(ctx: UsageConnectContext, profileId?: string): Promise<UsageConnectResult>
 
   /**
    * When `connect()` returned `'choose'`, host calls this with the
    * user's pick. Optional — providers that never choose omit it.
+   * Profile-aware: pass the SAME `profileId` you used for `connect()`.
    */
-  selectOption?(optionId: string): Promise<UsageConnectResult>
-
-  /** Drop credentials and stop any provider-side polling. */
-  disconnect(): Promise<void>
+  selectOption?(optionId: string, profileId?: string): Promise<UsageConnectResult>
 
   /**
-   * Fetch one fresh account-level snapshot. Empty `metrics: []` is
-   * fine when the provider has no billing surface yet — the capability
-   * stays `true` for the per-session bridge.
+   * Drop credentials and stop any provider-side polling for the
+   * specified profile. Omit `profileId` to disconnect the default profile.
    */
-  fetch(): Promise<UsageSnapshot>
+  disconnect(profileId?: string): Promise<void>
+
+  /**
+   * Fetch one fresh account-level snapshot for the specified profile.
+   * Empty `metrics: []` is fine when the provider has no billing surface
+   * yet — the capability stays `true` for the per-session bridge.
+   * Omit `profileId` to fetch the default profile.
+   */
+  fetch(profileId?: string): Promise<UsageSnapshot>
 
   /**
    * Recommended poll cadence (seconds). Host clamps to its bounds.

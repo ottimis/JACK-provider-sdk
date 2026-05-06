@@ -1,6 +1,6 @@
 # `@ottimis/jack-provider-sdk`
 
-Plugin contract for AI provider integrations in [Jack](https://github.com/ottimis/JACK). Every package that drives an AI coding agent inside Jack — `jack-claude`, `jack-codex`, `jack-gemini`, future `jack-<name>` — depends on this SDK and exports a single `JackProvider` object that satisfies the contract here.
+Plugin contract for AI provider integrations in Jack. Every package that drives an AI coding agent inside Jack — `jack-claude`, `jack-codex`, `jack-gemini`, future `jack-<name>` — depends on this SDK and exports a single `JackProvider` object that satisfies the contract here.
 
 ## What's in the box
 
@@ -41,9 +41,7 @@ export const myProvider: JackProvider = {
 }
 ```
 
-Step-by-step walkthrough (Pattern A vs Pattern B, capability matrix, knowledge context, gotchas): [`docs/implementing-a-provider.md`](./docs/implementing-a-provider.md).
-
-Full host-side contract: [`docs/provider-package-spec.md`](https://github.com/ottimis/JACK/blob/main/docs/provider-package-spec.md) in the consumer repo.
+Step-by-step walkthrough (Pattern A vs Pattern B, capability matrix, knowledge context, gotchas): [`docs/implementing-a-provider.md`](./docs/implementing-a-provider.md). Full type reference lives in the JSDoc on each exported type.
 
 ## Versioning
 

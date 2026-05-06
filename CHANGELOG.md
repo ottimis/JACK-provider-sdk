@@ -2,6 +2,42 @@
 
 All notable changes to `@ottimis/jack-provider-sdk` will be documented in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] — 2026-05-05
+
+### Added
+
+`UsageApi` is now profile-aware. Providers that also declare `capabilities.profiles=true` can drive distinct account-level usage flows for each profile (work vs personal Claude accounts polled independently, isolated cookie storage and login partitions).
+
+- `UsageApi.status(profileId?)` — query connection state for a specific profile.
+- `UsageApi.connect(ctx, profileId?)` — bind credentials to a profile. Different profileIds MUST use isolated storage AND isolated login surfaces (e.g. distinct BrowserWindow cookie partitions for Claude) so two accounts can sign in side by side.
+- `UsageApi.selectOption?(optionId, profileId?)` — same profile as the matching `connect()`.
+- `UsageApi.disconnect(profileId?)` — drop credentials for the specified profile only.
+- `UsageApi.fetch(profileId?)` — pull a fresh snapshot for the specified profile.
+
+`formatSessionMetrics()` stays profile-agnostic — per-session metrics already derive from the live process's context tokens (pinned to the session's profile via `applyProfile` at spawn time).
+
+Back-compat: `profileId` is optional everywhere. Providers without `capabilities.profiles=true` ignore it. Providers WITH profiles MUST resolve omission to their default profile (preserves hosts that don't yet thread profileId through).
+
+No breaking changes — every signature change is purely optional-param additive.
+
+## [0.6.0] — 2026-05-05
+
+### Added
+
+Multi-profile capability — multiple isolated config/identity dirs selectable per session. Lets a single Jack install drive distinct provider accounts (work / personal) without shell-alias dancing around `CLAUDE_CONFIG_DIR`.
+
+- `ProfilesApi` interface on `JackProvider.profiles?` (optional). Surface:
+  - `list()` — enumerate registered profiles (provider seeds a "Default" on first call to preserve the user's existing setup).
+  - `create(input)` / `update(id, patch)` / `remove(id)` — registry CRUD.
+  - `applyProfile(options, profileId)` — host calls this once per spawn after `applyKnowledgeContext` + `prepareSpawnOptions`; provider injects its native env var (Claude `CLAUDE_CONFIG_DIR`, Codex `CODEX_HOME`, …) into `options.env`.
+  - `probeProfile?(configDir)` — optional best-effort introspection so the UI can show "Connected as X" / "Empty profile" hints.
+- `ProviderProfile`, `ProviderProfileProbe`, `CreateProfileInput` types for the registry contract.
+- `CapabilityMatrix.profiles: boolean` — gates UI affordances. When `true`, `JackProvider.profiles` MUST be defined.
+
+Storage: provider persists the profile *list* via `host.kv` (already scoped per provider id). Profile *content* (auth, sessions, agents, history) lives inside `configDir` on disk and is the runtime's concern — Jack never reads or writes inside `configDir`.
+
+No breaking changes: every field is additive. Providers without profiles support set `capabilities.profiles = false` and omit the `profiles` field — host hides every related affordance.
+
 ## [0.4.0] — 2026-05-03
 
 ### Added

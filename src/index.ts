@@ -32,6 +32,7 @@ export * from './spawner'
 export * from './provider'
 export * from './usage'
 export * from './host'
+export * from './profiles'
 
 /**
  * Re-export of `NormalizedMessage` from chat-core so consumers don't need

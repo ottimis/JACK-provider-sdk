@@ -18,6 +18,7 @@
 
 import type { AgentBackend, AgentPermissionMode, AgentQueryOptions, McpServerSpec } from './backend'
 import type { HostServices } from './host'
+import type { ProfilesApi } from './profiles'
 import type { UsageApi } from './usage'
 import type { ZodType } from 'zod'
 import type {
@@ -274,6 +275,17 @@ export type CapabilityMatrix = {
    * usage bars and no Connect affordance is offered.
    */
   usage: boolean
+  /**
+   * Provider supports multiple isolated config/identity directories
+   * ("profiles") — distinct accounts, login states, agent customizations,
+   * and history sets all selectable per-session at runtime. When `true`,
+   * {@link JackProvider.profiles} MUST be defined; the host renders the
+   * profile picker UI and routes spawn-time `applyProfile` calls.
+   *
+   * When `false` the provider's runtime always uses its implicit default
+   * config dir; the host hides every profile-related affordance.
+   */
+  profiles: boolean
   /**
    * Permission modes the provider actually supports. Drives the
    * Shift-Tab cycle in the renderer (`MessageInputBar`) and any
@@ -677,6 +689,16 @@ export type JackProvider = {
    * decodes.
    */
   usage?: UsageApi
+  /**
+   * Multi-profile capability — multiple isolated config/identity dirs
+   * selectable per session. See {@link ProfilesApi}. Optional; when
+   * undefined `capabilities.profiles` MUST be `false` and the host hides
+   * every profile-related affordance. When defined, the host calls
+   * `applyProfile(options, profileId)` once per spawn so the provider can
+   * inject its native config-dir env var (Claude `CLAUDE_CONFIG_DIR`,
+   * Codex `CODEX_HOME`, …).
+   */
+  profiles?: ProfilesApi
   /**
    * Optional one-shot activation hook. Called once by the host during
    * registration with a {@link HostServices} bag scoped to this

@@ -1,8 +1,8 @@
 # Implementing a new provider
 
-Task-oriented guide for adding a new `JackProvider` (in-tree or as an external `jack-<name>` package). Type reference: see the JSDoc in `src/provider.ts`, `src/backend.ts`, `src/spawner.ts`, `src/host.ts`, `src/usage.ts`. Host-side contract spec: [`docs/provider-package-spec.md`](https://github.com/ottimis/JACK/blob/main/docs/provider-package-spec.md) in the JACK repo.
+Task-oriented guide for adding a new `JackProvider` (in-tree or as an external `jack-<name>` package). Type reference: see the JSDoc in `src/provider.ts`, `src/backend.ts`, `src/spawner.ts`, `src/host.ts`, `src/usage.ts`.
 
-This guide covers the **how**: what's needed, in what order, and which choices are non-obvious.
+This guide covers the **how**: what's needed, in what order, and which choices are non-obvious. Everything required to implement a provider is in this SDK — you don't need access to the host repo.
 
 ---
 
