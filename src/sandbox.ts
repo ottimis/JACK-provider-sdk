@@ -31,29 +31,35 @@
  */
 
 /**
- * Mount the provider's host-side config directory into the container.
- * Most providers persist auth + sessions + per-user settings in a dotfile
- * dir under `$HOME` (Claude `~/.claude`, Codex `~/.codex`, Gemini
- * `~/.gemini`). The host mounts this dir into the container at
- * {@link containerPath} so the CLI inside the container has access to the
- * same auth state as the host.
+ * Mount a provider-side config artifact (directory or file) into the
+ * container. Most providers persist auth + sessions + per-user settings in
+ * a dotfile dir under `$HOME` (Claude `~/.claude`, Codex `~/.codex`,
+ * Gemini `~/.gemini`); some additionally need a sibling config file
+ * mounted alongside (Claude `~/.claude.json` is a good example — the CLI
+ * reads it as the "main config" separate from the dotfile dir). The host
+ * mounts each entry into the container at {@link containerPath} so the CLI
+ * inside the container has access to the same state as the host.
  *
- * Read-only by default — the container shouldn't be writing back to the
- * user's persistent config from inside the sandbox. Set `readOnly: false`
- * only when the provider's CLI genuinely needs to mutate state inside the
- * config dir (e.g. session JSONL append).
+ * Read-only is recommended whenever the provider's CLI doesn't genuinely
+ * need to mutate state. Set `readOnly: false` when the CLI writes back —
+ * Claude writes session-env, project history, MCP additions; Codex appends
+ * thread JSONL; etc. The trade-off when RW is enabled: sandbox sessions
+ * share the same on-disk state as the host CLI (history, project state,
+ * MCP edits). If you need credential isolation, build a copy-on-write
+ * scratch volume — the {@link SandboxApi} contract doesn't impose one.
  */
 export type SandboxConfigMount = {
   /**
    * Absolute host path. Provider implementations resolve this lazily — call
-   * `os.homedir()` + `path.join(...)` at the time `configMount` is read,
+   * `os.homedir()` + `path.join(...)` at the time `configMounts` is read,
    * not at module-load time, so test environments and per-process HOME
-   * overrides work correctly.
+   * overrides work correctly. May point to either a directory or a single
+   * file — Docker's bind mount accepts both.
    */
   hostPath: string
   /** Absolute container path. */
   containerPath: string
-  /** When `true`, the host adds `:ro` to the bind. Default: `true` recommended. */
+  /** When `true`, the host adds `:ro` to the bind. */
   readOnly: boolean
 }
 
@@ -87,11 +93,17 @@ export interface SandboxApi {
   readonly binaryName: string
 
   /**
-   * Mount the provider's host-side config directory into the container.
-   * Optional — providers that are stateless on the host (none today)
-   * leave this undefined.
+   * Mount provider-side config artifacts (directories and/or files) into
+   * the container. Optional — providers that are stateless on the host
+   * (none today) leave this undefined or pass an empty array.
+   *
+   * Multiple entries support providers whose CLI splits state across more
+   * than one path (e.g. Claude needs both `~/.claude/` for the dotfile dir
+   * and `~/.claude.json` for the main config file). Order is preserved
+   * but mounts are independent — if two entries overlap, Docker resolves
+   * them in declaration order.
    */
-  readonly configMount?: SandboxConfigMount
+  readonly configMounts?: readonly SandboxConfigMount[]
 
   /**
    * Optional environment extras to inject into the container. Layered AFTER
