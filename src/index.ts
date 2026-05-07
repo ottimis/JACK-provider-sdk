@@ -33,6 +33,7 @@ export * from './provider'
 export * from './usage'
 export * from './host'
 export * from './profiles'
+export * from './sandbox'
 
 /**
  * Re-export of `NormalizedMessage` from chat-core so consumers don't need

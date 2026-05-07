@@ -19,6 +19,7 @@
 import type { AgentBackend, AgentPermissionMode, AgentQueryOptions, McpServerSpec } from './backend'
 import type { HostServices } from './host'
 import type { ProfilesApi } from './profiles'
+import type { SandboxApi } from './sandbox'
 import type { UsageApi } from './usage'
 import type { ZodType } from 'zod'
 import type {
@@ -287,6 +288,17 @@ export type CapabilityMatrix = {
    */
   profiles: boolean
   /**
+   * Provider can run inside Jack's Docker sandbox. When `true`,
+   * {@link JackProvider.sandbox} MUST be defined; the host enables the
+   * sandbox toggle in the new-session dialog and renders an entry for this
+   * provider in `Settings → Sandbox`.
+   *
+   * When `false` (or omitted), sandbox mode is unavailable for this
+   * provider — the toggle is hidden / disabled in the UI, and a spawn-time
+   * sandbox request returns a clear error.
+   */
+  sandbox: boolean
+  /**
    * Permission modes the provider actually supports. Drives the
    * Shift-Tab cycle in the renderer (`MessageInputBar`) and any
    * provider-aware UI that picks a mode (settings, slash commands).
@@ -304,6 +316,23 @@ export type CapabilityMatrix = {
    * or settings); the catalog only governs UI affordances.
    */
   permissionModes: readonly AgentPermissionMode[]
+  /**
+   * Suggested prompt-cache TTL in milliseconds — how long the provider's
+   * server-side prompt cache stays warm between user turns before a new
+   * cache-write is required. Optional: providers without prompt caching
+   * (or without a documented TTL) leave it undefined and the host hides
+   * the cache-countdown chip entirely for sessions on that provider.
+   *
+   * This is only the **suggested default**: the user can override per
+   * provider in `Settings → Prompt cache` and disable the chip outright.
+   * The host treats this as a UI-only countdown hint — never as a
+   * contract for actual cache eviction (the provider is the source of
+   * truth at request time).
+   *
+   * Claude declares 300_000 (5 min) per its prompt-caching docs. Codex
+   * and Gemini leave it undefined.
+   */
+  cacheTtlMs?: number
 }
 
 /**
@@ -699,6 +728,14 @@ export type JackProvider = {
    * Codex `CODEX_HOME`, …).
    */
   profiles?: ProfilesApi
+  /**
+   * Docker sandbox capability — provider declares the image, binary name,
+   * and config-dir mount the host needs to spawn a sandboxed session for
+   * this provider. See {@link SandboxApi}. Optional; when undefined
+   * `capabilities.sandbox` MUST be `false` and the host disables sandbox
+   * mode for this provider's sessions.
+   */
+  sandbox?: SandboxApi
   /**
    * Optional one-shot activation hook. Called once by the host during
    * registration with a {@link HostServices} bag scoped to this
