@@ -117,4 +117,54 @@ export interface SandboxApi {
    * sandbox even when the user has it on globally.
    */
   envExtras?(): Record<string, string>
+
+  /**
+   * Optional spawn-time setup hook. Runs once on the host before the
+   * container starts and lets the provider produce per-session artifacts
+   * (e.g. a sanitized `settings.json` with hooks stripped, a generated
+   * MCP manifest) and mount them into the container alongside the static
+   * {@link configMounts}.
+   *
+   * Returned `extraMounts` are appended to {@link configMounts} in
+   * declaration order. The `cleanup` callback (if provided) is invoked
+   * after the container exits so the provider can unlink temp files.
+   *
+   * Errors thrown here propagate as spawn failures — keep the work fast
+   * and synchronous-friendly (file I/O, not network calls).
+   */
+  prepareSpawn?(
+    ctx: SandboxSpawnContext
+  ): SandboxSpawnSetup | Promise<SandboxSpawnSetup>
+}
+
+/**
+ * Context passed to {@link SandboxApi.prepareSpawn}. Identifies the Jack
+ * session and the project root being mounted at `/workspace`. Providers
+ * use these to namespace temp files (one settings overlay per session)
+ * and avoid collisions across concurrent sandbox sessions.
+ */
+export interface SandboxSpawnContext {
+  /** Stable per-session id. Safe to embed in temp filenames. */
+  readonly sessionId: string
+  /** Absolute host path mounted at `/workspace` inside the container. */
+  readonly projectPath: string
+}
+
+/**
+ * Return value of {@link SandboxApi.prepareSpawn}. Both fields optional —
+ * a no-op setup just returns `{}`.
+ */
+export interface SandboxSpawnSetup {
+  /**
+   * Mounts to merge with the provider's static {@link configMounts}.
+   * Useful for overlaying generated files (e.g. a sanitized settings.json
+   * mounted on top of a config-dir mount shadows the original entry).
+   */
+  readonly extraMounts?: readonly SandboxConfigMount[]
+  /**
+   * Optional teardown. Invoked once after the container exits, even if
+   * the spawn fails after `prepareSpawn` resolved. Errors are logged but
+   * not propagated — cleanup is best-effort.
+   */
+  cleanup?(): void | Promise<void>
 }

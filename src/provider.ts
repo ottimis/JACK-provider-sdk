@@ -18,6 +18,7 @@
 
 import type { AgentBackend, AgentPermissionMode, AgentQueryOptions, McpServerSpec } from './backend'
 import type { HostServices } from './host'
+import type { OneshotApi } from './oneshot'
 import type { ProfilesApi } from './profiles'
 import type { SandboxApi } from './sandbox'
 import type { UsageApi } from './usage'
@@ -38,7 +39,13 @@ export type ProviderId = string
  * commands carry `body` + `filePath`, builtin and wire-sourced ones
  * don't (they don't *have* a markdown file behind them).
  */
-export type SlashCommandScope = 'builtin' | 'wire' | 'user' | 'project' | (string & {})
+export type SlashCommandScope =
+  | 'builtin'
+  | 'wire'
+  | 'user'
+  | 'project'
+  | 'jack-builtin'
+  | (string & {})
 
 /**
  * Common surface every slash command def carries regardless of source.
@@ -51,7 +58,7 @@ type SlashCommandDefBase = {
 }
 
 /**
- * Slash-command definition surfaced by a provider. Three sources can
+ * Slash-command definition surfaced by a provider. Four sources can
  * coexist (see {@link SlashCommandSupport}):
  *
  *   - `'builtin'` — static catalog the runtime intercepts. The renderer
@@ -64,6 +71,14 @@ type SlashCommandDefBase = {
  *     `filePath` + `body` are required so the renderer can offer "open
  *     in editor" affordances and the host can expand `$ARGUMENTS` /
  *     `$N` placeholders.
+ *   - `'jack-builtin'` — host-shipped slash command pack distributed
+ *     inside the Jack app bundle (e.g. `/changelog-turn`,
+ *     `/save-decision` for the user-data-tables feature). Read-only
+ *     for the user (no edit/delete), expanded the same way as
+ *     `'user'/'project'` (`$ARGUMENTS` + `$N` substitution). The body
+ *     comes from `resources/slash-commands/builtin/<name>.md`; the
+ *     renderer treats the catalog like any file-sourced command but
+ *     hides authoring affordances behind the `readonly` flag.
  *
  * Discriminated by `scope` so consumers narrow before reading the
  * file-only fields. Replaces the legacy uniform shape that forced
@@ -74,6 +89,31 @@ export type SlashCommandDef =
   | (SlashCommandDefBase & { scope: 'builtin' })
   | (SlashCommandDefBase & { scope: 'wire' })
   | (SlashCommandDefBase & { scope: 'user' | 'project'; body: string; filePath: string })
+  | (SlashCommandDefBase & { scope: 'jack-builtin'; body: string; readonly: true })
+
+/**
+ * Input shape for {@link SlashCommandSupport.createCommand}. The host
+ * collects these fields from a dialog form and hands them verbatim to
+ * the provider, which writes the markdown file in its native layout
+ * (Claude: `~/.claude/commands/<name>.md` for user scope,
+ * `<projectPath>/.claude/commands/<name>.md` for project).
+ *
+ * `name` may include subdirectory namespacing via `:` — e.g.
+ * `git:review` → file at `git/review.md` under the scope root.
+ * Provider validates the name (regex `[a-z][a-z0-9:-]*` typically) and
+ * rejects with an error when the file already exists (caller decides
+ * whether to retry with `overwrite`, omitted in v1 to avoid
+ * accidental clobbering).
+ */
+export type CreateSlashCommandInput = {
+  name: string
+  scope: 'user' | 'project'
+  description?: string
+  argumentHint?: string
+  body: string
+  /** Required when `scope === 'project'`. */
+  projectPath?: string
+}
 
 /**
  * Parsed envelope a provider's CLI may wrap slash commands in when it logs
@@ -148,6 +188,71 @@ export type SlashCommandSupport = {
     sessionId: string,
     callback: (commands: SlashCommandDef[]) => void
   ): () => void
+  /**
+   * Authoring: create a new file-sourced slash command on disk. Only
+   * meaningful for providers that surface file-based commands (Claude
+   * `.claude/commands/*.md`); providers without an on-disk format leave
+   * this undefined and the host hides the "+ New" affordance.
+   *
+   * Contract:
+   *   - Validates `input.name` against the provider's naming convention
+   *     (typical regex: `[a-z][a-z0-9:-]*` with `:` for subdirectory
+   *     namespacing).
+   *   - Resolves the target file path under the scope root, creating
+   *     intermediate directories as needed.
+   *   - Refuses overwrite when the file already exists (throws an
+   *     error with a stable code so the host can render a clear
+   *     conflict message).
+   *   - Writes frontmatter (`description`, `argument-hint`) plus the
+   *     body verbatim. Returns the absolute file path.
+   *
+   * The host calls this from `provider:slash-commands:create` IPC and
+   * the new file is picked up by {@link subscribeFsChanges} so the
+   * renderer's palette refreshes without a manual reload.
+   */
+  createCommand?(input: CreateSlashCommandInput): Promise<{ filePath: string }>
+  /**
+   * Authoring: delete a file-sourced slash command. The host passes the
+   * absolute `filePath` previously returned in a {@link SlashCommandDef}.
+   * `projectPath` (when provided) lets the provider validate
+   * project-scoped deletes too — without it, only files inside the user
+   * root are accepted (delete-by-path on a project file requires the
+   * caller to thread the project path through, which the host knows
+   * from the active session's cwd).
+   *
+   * Contract:
+   *   - Verifies that `filePath` is contained inside one of the provider's
+   *     known scope roots (path normalisation + `path.relative()` check)
+   *     to prevent the host from accidentally requesting deletion of a
+   *     file outside the slash-commands tree.
+   *   - Deletes the file. Idempotent: a missing file is treated as a
+   *     successful no-op (no `ENOENT` thrown).
+   *
+   * Like {@link createCommand}, omitting this field hides the "Delete"
+   * affordance for file-sourced rows in the renderer.
+   */
+  deleteCommand?(filePath: string, projectPath?: string): Promise<{ ok: true }>
+  /**
+   * Subscribe to filesystem changes in the provider's user/project
+   * command roots. Distinct from {@link subscribeToWireCommands}: this
+   * is fs-driven (markdown files added/edited/deleted on disk),
+   * whereas the wire variant is provider-pushed runtime state.
+   *
+   * Contract:
+   *   - The provider invokes the callback whenever a `.md` file under
+   *     a known root is added, modified, or deleted (debounce is the
+   *     provider's concern; the host treats the callback as "your
+   *     cached list is stale, refetch").
+   *   - The callback receives no payload — it's a stale-flag, not a
+   *     diff. The host responds by re-running `scanCommands` and
+   *     emitting `slashCommands:changed` to its renderers.
+   *   - Returns an unsubscribe function. The host calls it on shutdown
+   *     or provider switch.
+   *   - Optional. Providers without a file-based source (Codex,
+   *     Gemini today) leave this undefined and the host's cache is
+   *     invalidated only on session boundary events.
+   */
+  subscribeFsChanges?(callback: () => void): () => void
 }
 
 /**
@@ -298,6 +403,15 @@ export type CapabilityMatrix = {
    * sandbox request returns a clear error.
    */
   sandbox: boolean
+  /**
+   * Provider exposes a non-agentic single-shot completion via
+   * {@link JackProvider.oneshot}. When `false` the host hides any UI
+   * affordance that depends on it (e.g. CommitComposer's "AI commit
+   * message" button is disabled with an explanatory tooltip).
+   *
+   * When `true`, {@link JackProvider.oneshot} MUST be defined.
+   */
+  oneshot: boolean
   /**
    * Permission modes the provider actually supports. Drives the
    * Shift-Tab cycle in the renderer (`MessageInputBar`) and any
@@ -736,6 +850,13 @@ export type JackProvider = {
    * mode for this provider's sessions.
    */
   sandbox?: SandboxApi
+  /**
+   * One-shot completion capability — non-agentic, no tools, no session.
+   * See {@link OneshotApi}. Optional; when undefined `capabilities.oneshot`
+   * MUST be `false` and the host disables any UI affordance that relies
+   * on this primitive (e.g. CommitComposer's AI commit message button).
+   */
+  oneshot?: OneshotApi
   /**
    * Optional one-shot activation hook. Called once by the host during
    * registration with a {@link HostServices} bag scoped to this

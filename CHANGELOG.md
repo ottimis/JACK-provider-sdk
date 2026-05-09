@@ -2,6 +2,32 @@
 
 All notable changes to `@ottimis/jack-provider-sdk` will be documented in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.0] — 2026-05-09
+
+### Added
+
+Slash-command authoring: `SlashCommandSupport` gains three optional methods for in-app CRUD of file-sourced commands, plus a new discriminated arm for host-shipped Jack built-ins.
+
+- `CreateSlashCommandInput` — input shape for new file-sourced commands (name, scope, description, argumentHint, body, optional projectPath).
+- `SlashCommandSupport.createCommand(input)` — write a new `.md` file at the provider's native location (Claude: `~/.claude/commands/<name>.md` for `user` scope, `<projectPath>/.claude/commands/<name>.md` for `project`). Refuses overwrite. Returns the absolute filePath.
+- `SlashCommandSupport.deleteCommand(filePath)` — delete a file-sourced command after path-traversal validation. Idempotent on missing files.
+- `SlashCommandSupport.subscribeFsChanges(callback)` — fs-driven stale-flag (no payload). Distinct from `subscribeToWireCommands` (provider-pushed runtime state).
+- `SlashCommandDef` discriminated union gains a `'jack-builtin'` arm for host-shipped command packs (`/changelog-turn`, `/save-decision`, …) bundled inside the Jack app under `resources/slash-commands/builtin/`. Carries `body` + `readonly: true`; expanded with the same `$ARGUMENTS`/`$N` substitution as user/project. Renderer hides edit/delete affordances on read-only rows.
+- `SlashCommandScope` extended with `'jack-builtin'`.
+
+UI capability is derived from method presence — providers that declare `slashCommands` without `createCommand`/`deleteCommand` still serve discovery + invocation, but the renderer hides authoring affordances. No new `CapabilityMatrix` flag.
+
+No breaking changes — every addition is opt-in. Providers without slash-command authoring (Codex, Gemini today) ignore the new fields and continue to work as before.
+
+## [0.11.0] — 2026-05-08
+
+### Added
+
+- `OneshotApi` — non-agentic single-shot completion capability. Provider exposes `complete(options)` returning plain text; no tools, no MCP, no permission flow, no streaming. Used by the host for cheap quick calls (CommitComposer "AI commit message", future name suggesters). `OneshotCompleteOptions` carries `prompt`, optional `system`, `model`, `maxTokens`, `temperature`. `JackProvider.oneshot?: OneshotApi` + `CapabilityMatrix.oneshot: boolean` gate the host UI affordances.
+- `SandboxApi.prepareSpawn?(ctx)` — optional spawn-time setup hook. Provider produces per-session artifacts (sanitized `settings.json`, generated MCP manifest) returned via `extraMounts` (appended to static `configMounts`). Optional `cleanup` callback fires after container exit. Errors propagate as spawn failures. Used by Claude to scratchpad the user's `~/.claude` outside the container so virtiofs corruption can't escape.
+
+No breaking changes — both fields are optional.
+
 ## [0.7.0] — 2026-05-05
 
 ### Added
