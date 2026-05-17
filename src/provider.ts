@@ -17,6 +17,7 @@
  */
 
 import type { AgentBackend, AgentPermissionMode, AgentQueryOptions, McpServerSpec } from './backend'
+import type { ProviderDefaultsApi } from './defaults'
 import type { HostServices } from './host'
 import type { OneshotApi } from './oneshot'
 import type { ProfilesApi } from './profiles'
@@ -275,6 +276,19 @@ export type ReadSessionTranscriptOptions = {
    * current consumers.
    */
   includeSystemMessages?: boolean
+  /**
+   * Provider-config root for transcript lookup (Claude `CLAUDE_CONFIG_DIR`,
+   * Codex `CODEX_HOME`, …). When set, the provider reads transcripts from
+   * `<configDir>/<provider-native-subpath>` instead of its implicit default
+   * — required when the session was spawned under a non-default
+   * {@link ProviderProfile} so the JSONL/rollout file resolves correctly.
+   *
+   * The host resolves this from the session's pinned `profile_id` and
+   * passes it verbatim. Providers without a profile concept ignore the
+   * field; providers with profiles MUST treat it as authoritative when
+   * present.
+   */
+  configDir?: string
 }
 
 /**
@@ -857,6 +871,20 @@ export type JackProvider = {
    * on this primitive (e.g. CommitComposer's AI commit message button).
    */
   oneshot?: OneshotApi
+  /**
+   * User-configurable defaults applied to newly-created sessions —
+   * which model, reasoning-effort tier, and permission mode the host
+   * should pre-fill on the session row when the user spawns a new
+   * session against this provider. See {@link ProviderDefaultsApi}.
+   *
+   * Optional + presence-based. A provider that omits the field doesn't
+   * appear in `Settings → Provider defaults` and no pre-fill happens for
+   * its sessions (the runtime falls back to its built-in default model /
+   * effort / permission_mode at spawn time). Catalog-only contract: the
+   * provider declares the legal values, the host owns storage (kv) and
+   * resolution.
+   */
+  defaults?: ProviderDefaultsApi
   /**
    * Optional one-shot activation hook. Called once by the host during
    * registration with a {@link HostServices} bag scoped to this

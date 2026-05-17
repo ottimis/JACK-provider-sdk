@@ -2,6 +2,22 @@
 
 All notable changes to `@ottimis/jack-provider-sdk` will be documented in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.0] — 2026-05-16
+
+### Added
+
+Provider-declared user defaults — per-provider catalog of which `model`, `effort`, and `permission_mode` the host should pre-fill on newly created sessions. Catalog-only contract: providers declare the legal values, the host owns persistence (via its kv layer) and resolution.
+
+- `ProviderDefaultsApi` — top-level capability shape. `readonly fields: ReadonlyArray<ProviderDefaultsField>`.
+- `ProviderDefaultsField` — discriminated union by `kind`: `'model'` (with `{ value; label }[]` catalog), `'effort'` (with `AgentEffortLevel[]` catalog), `'permission_mode'` (with `AgentPermissionMode[]` catalog). Each provider declares only the kinds meaningful to its runtime.
+- `ProviderDefaultsValues` — resolved bag the host writes/reads at create time. All fields optional; `undefined` means "use the provider's runtime default".
+- `ProviderDefaultsResolveContext` — resolver call shape. `providerId` required; `workspaceId?` and `agentSlotId?` accepted today and reserved for future per-layer overrides (the resolver ignores them in v1 but the signature stays stable).
+- `JackProvider.defaults?: ProviderDefaultsApi` — new optional capability field. Presence-based gating: no `CapabilityMatrix` flag. A provider that omits the field doesn't appear in the host's Settings → Provider defaults UI and no pre-fill happens.
+
+Catalog is intentionally a NARROWER view than the equivalent `modelOptions` / `effortLevels` / `CapabilityMatrix.permissionModes` surfaces: those drive **live** affordances (inline dropdowns, Shift-Tab cycle); this drives the **saved-default** starting state. Providers typically exclude unsafe-to-default modes (Claude's `'auto'`, Codex/Gemini's `'bypassPermissions'`) from the defaults catalog while keeping them in the live cycle.
+
+No breaking changes — every addition is opt-in. Providers without saved defaults (any provider that doesn't declare `defaults`) keep working as before.
+
 ## [0.12.0] — 2026-05-09
 
 ### Added

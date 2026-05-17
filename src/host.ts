@@ -156,4 +156,21 @@ export type HostServices = {
   kv: HostKvScope
   /** Auth flow primitives (cookie login today; OAuth / device-code in the future). */
   auth: HostAuthService
+  /**
+   * Number of sessions currently pinned to a given profile id. Used by
+   * providers that surface profiles (`JackProvider.profiles`) to gate
+   * destructive operations:
+   *
+   *   - `remove(profileId)` refuses when count > 0 so the user can't
+   *     orphan the chat history of any pinned session.
+   *   - `update(profileId, { configDir })` may surface a confirm dialog
+   *     when count > 0 (UI-side concern; the API itself stays open since
+   *     the user can move the on-disk `projects/`/rollouts folder
+   *     manually to preserve history).
+   *
+   * Optional: providers without a profile concept never call it. The
+   * host implementation reads `SELECT COUNT(*) FROM sessions WHERE
+   * profile_id = ?`.
+   */
+  profileUsageCount?(profileId: string): number
 }

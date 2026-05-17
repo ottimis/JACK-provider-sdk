@@ -1,6 +1,6 @@
 {
   "name": "@ottimis/jack-provider-sdk",
-  "version": "0.12.0",
+  "version": "0.13.0",
   "description": "Plugin contract for AI provider integrations in Jack — backend interface, capability matrix, spawner primitives, knowledge context. Consumed both by in-tree providers and external packages.",
   "license": "MIT",
   "repository": {
@@ -29,14 +29,17 @@
     "clean": "rm -rf dist"
   },
   "peerDependencies": {
-    "@ottimis/jack-chat-core": ">=0.5.5",
+    "@ottimis/jack-chat-core": ">=0.7.0",
     "zod": ">=3.22.0"
   },
   "devDependencies": {
-    "@ottimis/jack-chat-core": "^0.5.5",
+    "@ottimis/jack-chat-core": "0.7.0",
     "@types/node": "^22.14.1",
     "tsx": "^4.19.2",
     "typescript": "^5.8.3",
     "zod": "^4.3.6"
+  },
+  "pnpm": {
+    "ignoredBuiltDependencies": ["esbuild"]
   }
 }

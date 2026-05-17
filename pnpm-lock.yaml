@@ -9,8 +9,8 @@ importers:
   .:
     devDependencies:
       '@ottimis/jack-chat-core':
-        specifier: ^0.5.5
-        version: 0.5.7
+        specifier: 0.7.0
+        version: 0.7.0
       '@types/node':
         specifier: ^22.14.1
         version: 22.19.17
@@ -182,8 +182,8 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@ottimis/jack-chat-core@0.5.7':
-    resolution: {integrity: sha512-BhP/8qvDwVIrHDrNqK87q8evgQRTBGnYRJboHw4+7mZVOM7OWX0TWlnomKG/LulVrHxLJ3QbxKrpfzbyLyAQ7g==}
+  '@ottimis/jack-chat-core@0.7.0':
+    resolution: {integrity: sha512-pDlvpRORgZ0Xe1cHKot/HqL7f0MuKgLDnN0a3kPJcn3Y7QrUdLS5WTG2IjjnOZ6gFiriW2qhoP0eQCDVjd2TdQ==}
 
   '@types/node@22.19.17':
     resolution: {integrity: sha512-wGdMcf+vPYM6jikpS/qhg6WiqSV/OhG+jeeHT/KlVqxYfD40iYJf9/AE1uQxVWFvU7MipKRkRv8NSHiCGgPr8Q==}
@@ -300,7 +300,7 @@ snapshots:
   '@esbuild/win32-x64@0.27.7':
     optional: true
 
-  '@ottimis/jack-chat-core@0.5.7': {}
+  '@ottimis/jack-chat-core@0.7.0': {}
 
   '@types/node@22.19.17':
     dependencies:

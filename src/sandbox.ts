@@ -31,36 +31,36 @@
  */
 
 /**
- * Mount a provider-side config artifact (directory or file) into the
- * container. Most providers persist auth + sessions + per-user settings in
- * a dotfile dir under `$HOME` (Claude `~/.claude`, Codex `~/.codex`,
- * Gemini `~/.gemini`); some additionally need a sibling config file
- * mounted alongside (Claude `~/.claude.json` is a good example — the CLI
- * reads it as the "main config" separate from the dotfile dir). The host
- * mounts each entry into the container at {@link containerPath} so the CLI
- * inside the container has access to the same state as the host.
+ * Mount a named Docker volume into the container at {@link containerPath}.
+ * The pattern Anthropic recommends for CLI config dirs (see
+ * https://code.claude.com/docs/en/devcontainer#persist-authentication-and-settings-across-rebuilds):
+ * the volume is auto-created on demand, persists across container
+ * restarts, and isolates writes from the host filesystem entirely.
+ * Best fit for `~/.claude`, `~/.codex`, `~/.gemini` since they hold auth
+ * tokens, session JSONLs, and CLI-mutated settings.
  *
- * Read-only is recommended whenever the provider's CLI doesn't genuinely
- * need to mutate state. Set `readOnly: false` when the CLI writes back —
- * Claude writes session-env, project history, MCP additions; Codex appends
- * thread JSONL; etc. The trade-off when RW is enabled: sandbox sessions
- * share the same on-disk state as the host CLI (history, project state,
- * MCP edits). If you need credential isolation, build a copy-on-write
- * scratch volume — the {@link SandboxApi} contract doesn't impose one.
+ * Read-only is recommended whenever the CLI doesn't genuinely need to
+ * mutate state. Set `readOnly: false` when the CLI writes back — Claude
+ * writes session-env, project history, MCP additions; Codex appends
+ * thread JSONL; etc.
  */
 export type SandboxConfigMount = {
   /**
-   * Absolute host path. Provider implementations resolve this lazily — call
-   * `os.homedir()` + `path.join(...)` at the time `configMounts` is read,
-   * not at module-load time, so test environments and per-process HOME
-   * overrides work correctly. May point to either a directory or a single
-   * file — Docker's bind mount accepts both.
+   * Docker volume name. The host auto-creates the volume if missing
+   * (via `docker volume create <name>`). Use a stable, namespaced name
+   * like `jack-sandbox-<provider>-config` so volumes can be inspected
+   * / pruned predictably from the Docker CLI.
+   *
+   * Volumes are NOT scoped per session by default — sharing one volume
+   * across sandbox sessions of the same provider is the common case
+   * and matches Anthropic's reference. If you need per-session
+   * isolation, embed the session id in the name.
    */
-  hostPath: string
+  readonly volumeName: string
   /** Absolute container path. */
-  containerPath: string
+  readonly containerPath: string
   /** When `true`, the host adds `:ro` to the bind. */
-  readOnly: boolean
+  readonly readOnly: boolean
 }
 
 /**
