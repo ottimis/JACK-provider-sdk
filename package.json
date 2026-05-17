@@ -34,12 +34,14 @@
   },
   "devDependencies": {
     "@ottimis/jack-chat-core": "0.7.0",
-    "@types/node": "^22.14.1",
-    "tsx": "^4.19.2",
-    "typescript": "^5.8.3",
-    "zod": "^4.3.6"
+    "@types/node": "^22.19.19",
+    "tsx": "^4.22.0",
+    "typescript": "^5.9.3",
+    "zod": "^4.4.3"
   },
   "pnpm": {
-    "ignoredBuiltDependencies": ["esbuild"]
+    "ignoredBuiltDependencies": [
+      "esbuild"
+    ]
   }
 }
