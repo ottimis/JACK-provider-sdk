@@ -1,2 +1,10 @@
 allowBuilds:
   esbuild: true
+
+# pnpm 11.5+ supply-chain policy: by default rejects any package
+# published within the last 24h to defend against typosquatting /
+# compromised packages. We trust our own scope, so exempt it — otherwise
+# the publish CI fails the moment we bump `@ottimis/jack-chat-core` and
+# tag this repo right after.
+minimumReleaseAgeExclude:
+  - '@ottimis/*'
