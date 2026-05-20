@@ -191,6 +191,26 @@ export type AgentQueryOptions = {
    */
   effort?: AgentEffortLevel
   /**
+   * Initial "fast mode" state for the spawn. When `true`, the provider
+   * enables its faster-but-pricier execution mode for any model whose
+   * catalog entry declared `supportsFastMode: true`
+   * ({@link ProviderModelOption.supportsFastMode}). Provider-internal
+   * mapping — Claude folds it into `Settings.fastMode` for the agent SDK;
+   * other providers map to their native equivalent or no-op when not
+   * supported.
+   *
+   * The host MUST only set this when the chosen `model` declares the
+   * capability. Setting `fast: true` on a non-supporting model is a host
+   * bug — providers MAY silently ignore it (defensive), MAY log a warning,
+   * but MUST NOT throw (defensive fallback keeps already-running sessions
+   * alive across model swaps).
+   *
+   * Per-session — flips trigger respawn in the host (the SDK runtime
+   * caches the flag at process start). Live mid-conversation toggle is
+   * out of scope in v1; the host evicts and respawns with the new value.
+   */
+  fast?: boolean
+  /**
    * Process spawner — decides how the provider's child process is launched.
    * Defaults to running locally. For sandboxed sessions, the host passes a
    * spawner created by `createDockerSpawner()`.

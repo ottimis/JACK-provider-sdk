@@ -46,6 +46,20 @@ export type ProviderProfile = {
   isDefault: boolean
   /** ISO 8601 — when the profile was first created in Jack's registry. */
   createdAt: string
+  /**
+   * True when this profile's `configDir` matches the runtime's **implicit
+   * default** — i.e. what the CLI/SDK uses when no per-profile env var is
+   * injected. For Claude that's `~/.claude` (when `CLAUDE_CONFIG_DIR` is
+   * unset); for other providers it's their equivalent.
+   *
+   * Surfaces a fact the provider already knows internally (it uses the
+   * match to skip env injection in `applyProfile`) so the host UI can
+   * route legacy sessions (those with `profile_id = NULL`) to the
+   * profile whose configDir the runtime actually uses for them — which
+   * is NOT necessarily `isDefault: true`. Optional; providers that don't
+   * distinguish an implicit default leave it undefined.
+   */
+  isImplicitDefault?: boolean
 }
 
 /**

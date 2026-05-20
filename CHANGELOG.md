@@ -2,6 +2,35 @@
 
 All notable changes to `@ottimis/jack-provider-sdk` will be documented in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.0] — 2026-05-19
+
+### Added
+
+- `ProviderProfile.isImplicitDefault?: boolean` — derived flag, true for the
+  profile whose `configDir` matches the runtime's implicit default (the dir
+  the runtime falls back to when no per-profile env var is injected). Lets
+  the host UI route legacy sessions (those with `profile_id = NULL`) to the
+  profile whose configDir the runtime actually uses for them, instead of
+  guessing from the registry default — which the user may have moved to a
+  different configDir, in which case the registry-default fallback surfaces
+  the wrong account. Optional and additive; providers that don't
+  distinguish the two concepts can omit it.
+
+## [0.15.0] — 2026-05-19
+
+### Added
+
+Per-model fast-mode capability — opt-in faster/pricier execution for specific models without provider-level capability gating.
+
+- `ProviderModelOption.supportsFastMode?: boolean` — declared on each model catalog entry that supports fast mode. The host renderer surfaces a Fast toggle (Off/On) in the chat composer only when the *currently selected* model has the flag set; toggling fast on a non-supporting model is structurally impossible.
+- `ProviderDefaultsField` (kind `'model'`) options entries gain the same optional flag — keeps the new-session defaults catalog aligned with the live composer dropdown.
+- `AgentQueryOptions.fast?: boolean` — neutral spawn-time setting the host threads into the spawn config. Providers fold it into their native runtime setting (Claude → `Settings.fastMode` via the SDK's flag-settings tier; Codex/Gemini leave it undefined and ignore the field).
+- v1 is spawn-time only — the runtime reads the flag at process start, so the host evicts and respawns on flip (`agentConfigFingerprint` covers this). A live mid-turn switch would need a new `AgentSession.setFastMode?` method on the contract; deferred until a use-case justifies the surface bump.
+
+**Why per-model instead of `CapabilityMatrix.fastMode`**: fast mode is a property OF a specific model, not of the provider as a whole. Pairing the flag with the model entry keeps the data model single-source — adding a new fast-capable model is one catalog edit, not two. Same presence-based gating philosophy as `JackProvider.defaults`.
+
+No breaking changes — `supportsFastMode` and `fast` are optional everywhere. Providers without fast-capable models stay untouched.
+
 ## [0.13.0] — 2026-05-16
 
 ### Added

@@ -60,8 +60,21 @@ export type ProviderDefaultsField =
        * `sessions.model` at create time; `label` is the human display.
        * Typically reuses `JackProvider.modelOptions` 1:1 but providers MAY
        * filter (e.g. hide experimental models from new-session pre-fill).
+       *
+       * `aliases` + `supportsFastMode` mirror
+       * {@link ProviderModelOption} (defined in `./provider`) for the same
+       * model id — the host reads metadata from whichever catalog is
+       * closest to the call site (live dropdown reads `modelOptions`,
+       * new-session pre-fill reads this). Provider authors typically
+       * duplicate fields across both catalogs by reference / spread; the
+       * SDK doesn't enforce coherence.
        */
-      options: ReadonlyArray<{ value: string; label: string }>
+      options: ReadonlyArray<{
+        value: string
+        label: string
+        aliases?: readonly string[]
+        supportsFastMode?: boolean
+      }>
     }
   | {
       kind: 'effort'

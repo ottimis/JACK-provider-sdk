@@ -311,10 +311,53 @@ export type ProviderModelDefaults = {
  * One entry of the inline model dropdown rendered under the chat composer.
  * `value` is what gets passed to the provider's `/model` slash handler;
  * `label` is the short human display (e.g. `Sonnet`, `Pro`, `Flash`).
+ *
+ * The catalog usually declares short family aliases (`opus`, `sonnet`) for
+ * the dropdown UX. The host stores the runtime's actual selected model id
+ * after the first `session_init` — typically a fully qualified id like
+ * `claude-opus-4-6`. The {@link aliases} field bridges the two: a strict
+ * lookup considers `value === stored` OR `aliases.includes(stored)`. No
+ * substring matching — additive forward-compatibility (a new concrete id
+ * the catalog hasn't been updated for is treated as "no metadata
+ * available" rather than misclassified, which keeps the fail-safe
+ * direction conservative: capability flags like {@link supportsFastMode}
+ * stay off until explicitly opted-in).
  */
 export type ProviderModelOption = {
   value: string
   label: string
+  /**
+   * Concrete runtime model ids that resolve to this catalog entry. Used by
+   * the host to bridge the family alias (`opus`) the user picks from the
+   * dropdown with the fully qualified id (`claude-opus-4-6`) the provider's
+   * `session_init` reports back. Strict equality — never a substring match.
+   *
+   * Why explicit: when a provider ships a new variant under the same
+   * family (hypothetical `claude-opus-mini`), substring matching would
+   * silently inherit the family's capability flags. Listing the ids that
+   * apply is the only way to keep new variants gated behind a deliberate
+   * catalog edit.
+   */
+  aliases?: readonly string[]
+  /**
+   * Whether this model supports the provider's "fast mode" — a per-model
+   * speed/cost trade-off the user can toggle per session. When `true`, the
+   * renderer surfaces a Fast toggle in the chat composer (next to the model
+   * pill) and the host threads {@link AgentQueryOptions.fast} into the spawn
+   * config. Presence-based gating: models that don't declare this field
+   * never show the toggle, and toggling fast on a non-supporting model is
+   * structurally impossible (the UI key on the model selection).
+   *
+   * Claude declares this on Opus 4.6/4.7 (mapped to `Settings.fastMode` in
+   * `@anthropic-ai/claude-agent-sdk`). Other providers leave it undefined.
+   *
+   * Why a per-model flag and not a provider-level `CapabilityMatrix`
+   * boolean: fast mode is a property OF a specific model, not of the
+   * provider as a whole. Pairing the flag with the model entry keeps the
+   * data model single-source — adding a new fast-capable model is one
+   * catalog edit, not two.
+   */
+  supportsFastMode?: boolean
 }
 
 /**
