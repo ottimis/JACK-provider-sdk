@@ -18,6 +18,7 @@
 
 import type { AgentBackend, AgentPermissionMode, AgentQueryOptions, McpServerSpec } from './backend'
 import type { ProviderDefaultsApi } from './defaults'
+import type { DiagnosticsApi } from './diagnostics'
 import type { HostServices } from './host'
 import type { OneshotApi } from './oneshot'
 import type { ProfilesApi } from './profiles'
@@ -928,6 +929,17 @@ export type JackProvider = {
    * resolution.
    */
   defaults?: ProviderDefaultsApi
+  /**
+   * Spawn diagnostics capability — advisory, non-fatal observations about a
+   * session (e.g. an oversized memory file) that the host surfaces as a
+   * generic banner. See {@link DiagnosticsApi}.
+   *
+   * Optional + presence-based, like {@link defaults}: a provider that omits
+   * the field produces no banners and the host never calls in. No
+   * `CapabilityMatrix` flag — there is no persistent UI affordance to gate.
+   * Diagnostics are strictly advisory: they never block or fail a spawn.
+   */
+  diagnostics?: DiagnosticsApi
   /**
    * Optional one-shot activation hook. Called once by the host during
    * registration with a {@link HostServices} bag scoped to this

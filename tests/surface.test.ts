@@ -18,6 +18,8 @@ import {
   type BackendName,
   type CapabilityMatrix,
   type ClientToolHandlerAttachContext,
+  type DiagnosticsApi,
+  type DiagnosticsInspectContext,
   type InProcessMcpServerSpec,
   type InProcessMcpToolSpec,
   type JackProvider,
@@ -38,6 +40,8 @@ import {
   type ProviderIconKey,
   type ProviderModelDefaults,
   type ProviderModelOption,
+  type ProviderDiagnostic,
+  type ProviderDiagnosticSeverity,
   type ProviderPolicies,
   type SlashCommandDef,
   type SlashCommandScope,
@@ -240,6 +244,28 @@ test('ProviderModelOption / ModelDefaults', () => {
   const defaults: ProviderModelDefaults = { oneShot: 'haiku' }
   assert.equal(opt.value, 'opus')
   assert.equal(defaults.oneShot, 'haiku')
+})
+
+test('DiagnosticsApi — spawn diagnostics capability surface', () => {
+  const severity: ProviderDiagnosticSeverity = 'warning'
+  const diag: ProviderDiagnostic = {
+    id: 'claude.memory.oversize',
+    severity,
+    title: 'Large CLAUDE.md file detected',
+    detail: '/repo/CLAUDE.md — 52,000 chars (> 40,000)',
+    paths: ['/repo/CLAUDE.md']
+  }
+  const api: DiagnosticsApi = {
+    inspectSpawn: async (ctx: DiagnosticsInspectContext) => {
+      assert.equal(typeof ctx.cwd, 'string')
+      return [diag]
+    }
+  }
+  // Presence-based capability: a provider MAY attach it to JackProvider.
+  const provider: Partial<JackProvider> = { diagnostics: api }
+  assert.equal(provider.diagnostics, api)
+  assert.equal(diag.severity, 'warning')
+  assert.deepEqual(diag.paths, ['/repo/CLAUDE.md'])
 })
 
 test('InProcessMcpToolSpec.schema is a zod-shape', () => {
