@@ -20,6 +20,7 @@ import type { AgentBackend, AgentPermissionMode, AgentQueryOptions, McpServerSpe
 import type { ProviderDefaultsApi } from './defaults'
 import type { DiagnosticsApi } from './diagnostics'
 import type { HostServices } from './host'
+import type { InteractiveLaunchApi } from './interactiveLaunch'
 import type { OneshotApi } from './oneshot'
 import type { ProfilesApi } from './profiles'
 import type { SandboxApi } from './sandbox'
@@ -940,6 +941,19 @@ export type JackProvider = {
    * Diagnostics are strictly advisory: they never block or fail a spawn.
    */
   diagnostics?: DiagnosticsApi
+  /**
+   * Interactive-launch capability — build the command that starts this
+   * provider's interactive CLI (its terminal TUI) for a session, pre-loaded
+   * with the composed context. See {@link InteractiveLaunchApi} and ADR 0006
+   * ("Dual session engine"). Powers the per-session `terminal` engine, where
+   * a human drives the embedded TUI (subscription-billed) instead of the
+   * stream-json control protocol (Agent SDK credit pool).
+   *
+   * Optional + presence-based, like {@link defaults} / {@link diagnostics}: a
+   * provider that omits the field does not support the terminal engine, and
+   * the host hides the engine picker for it. No `CapabilityMatrix` flag.
+   */
+  interactiveLaunch?: InteractiveLaunchApi
   /**
    * Optional one-shot activation hook. Called once by the host during
    * registration with a {@link HostServices} bag scoped to this
