@@ -30,6 +30,7 @@
  * signals (chat bubbles, tool cards, snapshots) are delivered out-of-band via
  * the provider's hook wiring — see {@link InteractiveHookSink}.
  */
+import type { ToolShape } from '@ottimis/jack-chat-core'
 
 /**
  * Where the launched interactive session should POST live lifecycle/event
@@ -110,6 +111,26 @@ export type InteractiveLaunchOptions = {
 }
 
 /**
+ * A native hook POST body interpreted into a neutral event the host can act on
+ * (ADR 0006, M2) WITHOUT knowing the provider's hook wire shapes. The provider
+ * maps its own payload (e.g. Claude Code's `hook_event_name` + `tool_name` +
+ * `tool_input`) into this canonical form.
+ *
+ * Only the cases the host acts on are modeled; everything else collapses to
+ * `other` (the host treats it as a plain "re-read the transcript" signal):
+ *   - `pre-tool` — a tool is about to run. Carries the canonical {@link
+ *     ToolShape} + the write target path, so the host can run its (provider-
+ *     neutral) transversal write guard and, on a deny verdict, send a blocking
+ *     hook response built via {@link InteractiveLaunchApi.buildHookDecisionResponse}.
+ */
+export type InteractiveHookEvent =
+  | { kind: 'pre-tool'; toolName: string; toolShape: ToolShape; filePath: string | null }
+  | { kind: 'other' }
+
+/** Host decision the provider formats into its native hook-response body. */
+export type InteractiveHookDecision = { decision: 'allow' | 'deny'; reason?: string }
+
+/**
  * The launch command the host spawns in a PTY. Pure data (serializable on
  * purpose, so a thin out-of-app `jack <agent>` CLI can fetch it from the
  * running app over an endpoint and exec it without rebuilding anything).
@@ -139,8 +160,27 @@ export type InteractiveLaunchSpec = {
  * Synchronous and side-effect-free: `build` only assembles data. The host
  * performs the fs writes (from {@link InteractiveLaunchSpec.files}) and the
  * process spawn.
+ *
+ * The optional hook methods let the host act on the live feed (wired by
+ * `build` via `hookSink`) while staying provider-neutral: the provider owns the
+ * wire-shape parsing ({@link interpretHookEvent}) and response formatting
+ * ({@link buildHookDecisionResponse}); the host owns the policy (e.g. the
+ * transversal write guard) and the canonical types in between. A provider that
+ * omits them gets an advisory-only feed (no blocking).
  */
 export type InteractiveLaunchApi = {
   /** Assemble the launch spec for an interactive (TUI) session. */
   build(opts: InteractiveLaunchOptions): InteractiveLaunchSpec
+  /**
+   * Interpret a native hook POST body into a neutral {@link InteractiveHookEvent},
+   * or null for bodies this provider doesn't model. Lets the host evaluate its
+   * write guard / live signals without parsing provider-specific shapes.
+   */
+  interpretHookEvent?(rawBody: unknown): InteractiveHookEvent | null
+  /**
+   * Format the host's {@link InteractiveHookDecision} into this provider's
+   * native hook-response body, which the host returns as the HTTP hook
+   * response (e.g. Claude's `{ hookSpecificOutput: { permissionDecision } }`).
+   */
+  buildHookDecisionResponse?(decision: InteractiveHookDecision): unknown
 }
