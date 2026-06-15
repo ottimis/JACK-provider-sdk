@@ -123,9 +123,19 @@ export type InteractiveLaunchOptions = {
  *     neutral) transversal write guard and, on a deny verdict, send a blocking
  *     hook response built via {@link InteractiveLaunchApi.buildHookDecisionResponse}.
  */
-export type InteractiveHookEvent =
+export type InteractiveHookEvent = {
+  /**
+   * Session-lifecycle transition this hook implies, if any (ADR 0006, M2d). The
+   * terminal engine has no control protocol, so this is how the host learns a
+   * terminal session is working vs finished: e.g. a submitted prompt or tool
+   * activity → `active`, the turn's end → `completed`. Orthogonal to `kind` —
+   * a `pre-tool` event is also an `active` signal.
+   */
+  status?: 'active' | 'completed'
+} & (
   | { kind: 'pre-tool'; toolName: string; toolShape: ToolShape; filePath: string | null }
   | { kind: 'other' }
+)
 
 /** Host decision the provider formats into its native hook-response body. */
 export type InteractiveHookDecision = { decision: 'allow' | 'deny'; reason?: string }
