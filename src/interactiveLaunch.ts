@@ -87,6 +87,15 @@ export type InteractiveLaunchOptions = {
   /** Initial permission mode (Claude: `--permission-mode`). */
   permissionMode?: string
   /**
+   * Tools to pre-authorize so they don't prompt for permission (Claude:
+   * `--allowedTools`). The host uses this to pre-trust its own first-party MCP
+   * server in the terminal engine — the mirror of the chat path's host-side
+   * auto-allow, which the terminal engine can't do (no control protocol /
+   * `canUseTool`). Entries follow the provider's tool-name syntax (e.g.
+   * `mcp__<server>` to allow a whole MCP server).
+   */
+  allowedTools?: string[]
+  /**
    * The fully-composed system-prompt append (workspace context + knowledge +
    * transversal rules + agent-definition body) the host already builds for
    * chat sessions. The provider materializes it under `scratchDir` and
