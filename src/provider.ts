@@ -24,6 +24,7 @@ import type { InteractiveLaunchApi } from './interactiveLaunch'
 import type { OneshotApi } from './oneshot'
 import type { ProfilesApi } from './profiles'
 import type { SandboxApi } from './sandbox'
+import type { ProviderSettingsApi } from './settings'
 import type { UsageApi } from './usage'
 import type { ZodType } from 'zod'
 import type {
@@ -941,6 +942,19 @@ export type JackProvider = {
    * Diagnostics are strictly advisory: they never block or fail a spawn.
    */
   diagnostics?: DiagnosticsApi
+  /**
+   * Provider-declared configuration toggles — boolean settings the host
+   * renders as generic on/off controls and persists via the provider. See
+   * {@link ProviderSettingsApi}.
+   *
+   * Optional + presence-based, like {@link defaults} / {@link diagnostics}:
+   * a provider that omits the field exposes no toggles and the host renders
+   * nothing. No `CapabilityMatrix` flag. The host never interprets a
+   * toggle's `id` — it only lists them and round-trips get/set, so no
+   * provider-specific knowledge leaks into the host. Claude uses this to
+   * surface its `switchModelsOnFlag` safety-fallback toggle per project.
+   */
+  settings?: ProviderSettingsApi
   /**
    * Interactive-launch capability — build the command that starts this
    * provider's interactive CLI (its terminal TUI) for a session, pre-loaded

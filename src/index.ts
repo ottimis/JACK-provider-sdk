@@ -37,6 +37,7 @@ export * from './sandbox'
 export * from './oneshot'
 export * from './defaults'
 export * from './diagnostics'
+export * from './settings'
 export * from './interactiveLaunch'
 
 /**
