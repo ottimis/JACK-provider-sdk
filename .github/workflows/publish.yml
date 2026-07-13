@@ -13,9 +13,11 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@v6
+      # No `version:` input — pnpm/action-setup@v6 reads the pinned version from
+      # the `packageManager` field in package.json (pnpm@11.0.8). Passing a bare
+      # major here triggers a v6 metadata-resolution bug ("Cannot use 'in'
+      # operator to search for 'integrity' in undefined").
       - uses: pnpm/action-setup@v6
-        with:
-          version: 11
       - uses: actions/setup-node@v6
         with:
           node-version: 22

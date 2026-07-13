@@ -87,8 +87,13 @@ export type McpServerSpec =
   | { type: 'http'; url: string; headers?: Record<string, string> }
   | { type: 'sse'; url: string; headers?: Record<string, string> }
 
-/** Reasoning-effort knob. Provider-validated; not all providers honor every value. */
-export type AgentEffortLevel = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+/**
+ * Reasoning-effort knob. Provider-validated; not all providers honor every
+ * value — each provider advertises the subset it accepts via
+ * `JackProvider.effortLevels`, and the renderer only offers those. `'ultra'`
+ * is the top tier, currently exposed only by some Codex models.
+ */
+export type AgentEffortLevel = 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra'
 
 /**
  * Hook handler — receives a normalized lifecycle event and may return an
