@@ -478,3 +478,32 @@ test('JackProvider.usage is optional', () => {
   }
   assert.equal(noUsage.usage, undefined)
 })
+
+test('JackProvider.canonicalModelId is optional and folds same-model ids', () => {
+  const withCanon: JackProvider = {
+    id: 'canon',
+    label: 'Canon',
+    detect: async () => ({ installed: true }),
+    backends: [],
+    defaultBackendId: 'sdk',
+    capabilities: {} as CapabilityMatrix,
+    modelDefaults: { oneShot: 'cheap-model' },
+    toolCatalog: [],
+    parseToolName: (rawName) => ({ kind: 'native', toolName: rawName }),
+    applyKnowledgeContext: () => {},
+    readSessionTranscript: async () => [],
+    // Strips the context-window decoration so `foo[1m]` and `foo` compare
+    // equal for switch detection, while preserving genuine family differences.
+    canonicalModelId: (modelId) => modelId.replace(/\[1m\]$/i, '')
+  }
+  assert.equal(withCanon.canonicalModelId?.('claude-opus-4-8[1m]'), 'claude-opus-4-8')
+  assert.equal(withCanon.canonicalModelId?.('claude-opus-4-8'), 'claude-opus-4-8')
+  assert.notEqual(
+    withCanon.canonicalModelId?.('claude-fable-5'),
+    withCanon.canonicalModelId?.('claude-opus-4-8')
+  )
+
+  const noCanon: JackProvider = { ...withCanon, id: 'no-canon' }
+  delete (noCanon as { canonicalModelId?: unknown }).canonicalModelId
+  assert.equal(noCanon.canonicalModelId, undefined)
+})

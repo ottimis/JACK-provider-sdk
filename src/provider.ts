@@ -432,8 +432,17 @@ export type CapabilityMatrix = {
    *     runtime errors; the model reads the error and self-corrects
    *     (Codex). The PermissionCard has no channel to subscribe to: the
    *     renderer hides it and only shows the post-fact audit log.
+   *   - `'hybrid'` — both at once: a spawn-time sandbox / approval policy
+   *     governs most tool calls (like `'sandbox-only'`), AND the provider
+   *     can additionally raise per-call approval requests through the
+   *     `canUseTool` callback for the subset of actions its runtime escalates
+   *     (e.g. Codex app-server `request_user_input` / command-approval).
+   *     The renderer shows the PermissionCard (as for `'callback'`) and the
+   *     host resolves those requests through the callback; the sandbox still
+   *     backstops everything the provider does not escalate. Used by
+   *     providers that have a live approval channel layered over a sandbox.
    */
-  permissionGranularity: 'callback' | 'sandbox-only'
+  permissionGranularity: 'callback' | 'sandbox-only' | 'hybrid'
   /**
    * Provider exposes a usage / billing surface (account-level snapshot
    * via `provider.usage.fetch()` and/or per-session metric translation
@@ -968,6 +977,28 @@ export type JackProvider = {
    * the host hides the engine picker for it. No `CapabilityMatrix` flag.
    */
   interactiveLaunch?: InteractiveLaunchApi
+  /**
+   * Fold a concrete model id to a canonical key for *same-model* equality.
+   *
+   * The host compares the model a session was resolved to at boot
+   * (`session_init.model`) against the model that actually served each
+   * assistant turn (`assistant.message.model`) to detect an unsolicited
+   * provider-side switch (e.g. Claude Fable's guardrail fallback to Opus).
+   * That comparison is a plain string inequality — but some providers emit
+   * two spellings of the *same* served model across those two channels.
+   * Claude is the case in point: `session_init` echoes the requested
+   * context-window variant (`claude-opus-4-8[1m]`) while each assistant
+   * turn reports the plain API id (`claude-opus-4-8`), so a naive `!==`
+   * false-fires on every turn of a 1M session.
+   *
+   * A provider implements this to strip such non-identifying decoration
+   * (the `[1m]` suffix for Claude) so that ids denoting the same served
+   * model canonicalize equal. It MUST be a pure, idempotent string→string
+   * map and MUST preserve genuine model-family differences (Fable vs Opus
+   * must stay distinct). Optional + presence-based: when a provider omits
+   * it the host compares raw ids verbatim (identity canonicalization).
+   */
+  canonicalModelId?(id: string): string
   /**
    * Optional one-shot activation hook. Called once by the host during
    * registration with a {@link HostServices} bag scoped to this
