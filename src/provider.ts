@@ -777,6 +777,27 @@ export type JackProvider = {
    */
   modelOptions?: readonly ProviderModelOption[]
   /**
+   * Optional dynamic model catalog. When present, the host calls this to
+   * discover the currently-available models (e.g. a CLI that ships its own
+   * catalog and evolves faster than a hardcoded list) and uses the result
+   * as the base for the inline Model dropdown instead of {@link modelOptions}.
+   *
+   * Semantics:
+   *   - Called by the host when it (re)builds the provider listing
+   *     (`provider:list`), and the result is cached alongside the rest of the
+   *     listing (refreshed on `provider:recheck` / boot).
+   *   - The provider is responsible for filtering to user-selectable models
+   *     and returning display-ready `{ value, label }` entries.
+   *   - On throw or an empty result the host falls back to the static
+   *     {@link modelOptions}, so implementing this never *removes* the
+   *     dropdown — it only refreshes it. User-defined custom models are
+   *     merged on top of whichever base list is used.
+   *
+   * Presence-based (no `CapabilityMatrix` flag): a provider with a stable
+   * family just declares `modelOptions` and omits this.
+   */
+  listModels?(): Promise<readonly ProviderModelOption[]>
+  /**
    * Reasoning-effort tiers surfaced in the inline Effort dropdown.
    * Empty / omitted = no Effort dropdown rendered. Selection fires the
    * provider's `/effort <value>` slash handler. Only Claude exposes
