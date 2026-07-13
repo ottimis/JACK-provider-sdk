@@ -61,19 +61,25 @@ export type ProviderDefaultsField =
        * Typically reuses `JackProvider.modelOptions` 1:1 but providers MAY
        * filter (e.g. hide experimental models from new-session pre-fill).
        *
-       * `aliases` + `supportsFastMode` mirror
+       * `aliases` + `supportsFastMode` + `effortLevels` mirror
        * {@link ProviderModelOption} (defined in `./provider`) for the same
        * model id — the host reads metadata from whichever catalog is
        * closest to the call site (live dropdown reads `modelOptions`,
        * new-session pre-fill reads this). Provider authors typically
        * duplicate fields across both catalogs by reference / spread; the
        * SDK doesn't enforce coherence.
+       *
+       * `effortLevels` lets the defaults UI (and the host validator) gate the
+       * `effort` field by the selected model, so a saved default can't pair
+       * `ultra` with a model that tops out at `xhigh`. Absent = the effort
+       * field's full option list applies.
        */
       options: ReadonlyArray<{
         value: string
         label: string
         aliases?: readonly string[]
         supportsFastMode?: boolean
+        effortLevels?: readonly AgentEffortLevel[]
       }>
     }
   | {

@@ -153,4 +153,37 @@ export type ProfilesApi = {
    * own config dir omit this and the UI falls back to a path-only display.
    */
   probeProfile?(configDir: string): Promise<ProviderProfileProbe>
+
+  /**
+   * Copy a session's conversation transcript from one profile's config dir to
+   * another's, so the target profile (a different account) can **resume the
+   * same conversation with full history** — not a lossy re-summary.
+   *
+   * Rationale: a runtime's transcript is purely local context and the model API
+   * is stateless, so continuing a conversation under a different account is a
+   * local file copy + a resume under that account's config dir. The provider
+   * owns its transcript layout; the host only supplies canonical ids + cwd.
+   *
+   * Contract:
+   *   - Copy (do NOT move) the transcript identified by `providerSessionId`
+   *     from `fromProfileId`'s config dir to `toProfileId`'s config dir, written
+   *     under `newProviderSessionId` (a host-generated fresh id — keeps the
+   *     host's session↔transcript mapping unique). The source is left intact.
+   *   - `projectPath` is the canonical cwd; the provider encodes it into its own
+   *     on-disk layout. `resume` must key off the destination id/filename, so no
+   *     rewrite of ids embedded inside the transcript is required.
+   *   - Returns `{ ok:false, error }` when the source transcript is missing or
+   *     either profile id is unknown — the host then falls back to its lossy
+   *     compact handoff.
+   *
+   * Optional: providers whose transcripts can't be relocated this way omit it,
+   * and the host keeps offering only the compact handoff (presence-based gate).
+   */
+  transferSession?(input: {
+    providerSessionId: string
+    projectPath: string
+    fromProfileId: string
+    toProfileId: string
+    newProviderSessionId: string
+  }): Promise<{ ok: boolean; error?: string }>
 }

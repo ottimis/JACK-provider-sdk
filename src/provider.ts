@@ -16,7 +16,13 @@
  * it free of provider-specific imports.
  */
 
-import type { AgentBackend, AgentPermissionMode, AgentQueryOptions, McpServerSpec } from './backend'
+import type {
+  AgentBackend,
+  AgentEffortLevel,
+  AgentPermissionMode,
+  AgentQueryOptions,
+  McpServerSpec
+} from './backend'
 import type { ProviderDefaultsApi } from './defaults'
 import type { DiagnosticsApi } from './diagnostics'
 import type { HostServices } from './host'
@@ -361,6 +367,22 @@ export type ProviderModelOption = {
    * catalog edit, not two.
    */
   supportsFastMode?: boolean
+  /**
+   * Reasoning-effort tiers this specific model accepts. Providers whose
+   * effort catalog varies per model (e.g. Codex — `gpt-5.6-sol` accepts
+   * `…max ultra` while `gpt-5.4` tops out at `xhigh`) declare the exact set
+   * here, read straight from the runtime (Codex parses
+   * `supported_reasoning_levels` from `codex debug models`).
+   *
+   * When present, the renderer offers exactly these tiers for the model and
+   * clears an incompatible effort on model switch. When absent, it falls
+   * back to the provider-level {@link JackProvider.effortLevels} — the safe
+   * default for custom / metadata-less models. Same per-model gating
+   * rationale as {@link supportsFastMode}: the granularity belongs to the
+   * model, not the provider, so pairing it with the entry keeps the data
+   * model single-source.
+   */
+  effortLevels?: readonly AgentEffortLevel[]
 }
 
 /**
