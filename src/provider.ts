@@ -368,6 +368,44 @@ export type ReadSessionTranscriptOptions = {
 }
 
 /**
+ * Tri-state existence of a provider-side session transcript, returned by
+ * {@link JackProvider.sessionTranscriptState}.
+ *
+ *   - `'present'` — the transcript file was located and stat'd.
+ *   - `'missing'` — the transcript is *provably* absent: the lookup root was
+ *     resolved with confidence AND an exhaustive lookup found nothing.
+ *   - `'unknown'` — cannot tell (root unresolvable, permission/I/O error, no
+ *     profile routing available, or any doubt whatsoever).
+ *
+ * The asymmetry is deliberate — see the doc comment on
+ * {@link JackProvider.sessionTranscriptState}. When in doubt, return
+ * `'unknown'`; never guess `'missing'`.
+ */
+export type SessionTranscriptState = 'present' | 'missing' | 'unknown'
+
+/**
+ * Options for {@link JackProvider.sessionTranscriptState}. Mirrors the
+ * routing fields of {@link ReadSessionTranscriptOptions} (the two methods
+ * share the same transcript-lookup logic) but only the bits needed to
+ * *locate* the file — no pagination / content shaping.
+ */
+export type SessionTranscriptStateOptions = {
+  /** Provider-side conversation id (the value persisted in `sessions.provider_session_id`). REQUIRED. */
+  providerSessionId: string
+  /** Session cwd — narrows the lookup to one project bucket (Claude `~/.claude/projects/<encoded>`). */
+  cwd?: string
+  /**
+   * Profile-pinned config root, resolved host-side from `sessions.profile_id`
+   * — same semantics as {@link ReadSessionTranscriptOptions.configDir}.
+   * Providers with a profiles capability MUST treat it as authoritative when
+   * present; a provider that cannot honor a supplied `configDir` MUST return
+   * `'unknown'` rather than probing the wrong (default) root and risking a
+   * false `'missing'`.
+   */
+  configDir?: string
+}
+
+/**
  * Provider-declared model identifiers used by host one-shot tasks. These
  * are the bits of "we need to ask the model something cheap and quick"
  * (session-name suggestion, agent-def suggestion, shared-template hint)
@@ -961,6 +999,36 @@ export type JackProvider = {
    * fresh row, never sent a turn).
    */
   readSessionTranscript(opts: ReadSessionTranscriptOptions): Promise<NormalizedMessage[]>
+  /**
+   * Report whether a session's provider-side transcript file still exists.
+   *
+   * Motivation: {@link readSessionTranscript} returns `[]` for BOTH "brand
+   * new session, nothing written yet" and "transcript deleted by the
+   * provider's own retention", so the host cannot tell a resumable session
+   * from a ghost one on read alone. This method is the existence primitive
+   * that disambiguates them, letting the host auto-archive sessions whose
+   * history is gone.
+   *
+   * Semantics are conservative by design because `'missing'` is a claim the
+   * host acts on destructively-ish (it auto-archives the row). The asymmetry
+   * is deliberate: a false `'missing'` archives a live session, while a false
+   * `'present'` costs the user only one stale row — so `'unknown'` is the
+   * correct answer under ANY doubt. Return:
+   *
+   *   - `'present'` — only when the file was actually found and stat'd.
+   *   - `'missing'` — only when the lookup root was resolved with confidence
+   *     AND an exhaustive lookup found nothing. Never guess this.
+   *   - `'unknown'` — root unresolvable, permission/I/O error, no profile
+   *     routing available, a `configDir` the implementation cannot honor, or
+   *     any doubt whatsoever.
+   *
+   * Optional + presence-based (no {@link CapabilityMatrix} flag): a provider
+   * that omits this method is treated by the host as all-`'unknown'`, and its
+   * sessions are never swept.
+   */
+  sessionTranscriptState?(
+    opts: SessionTranscriptStateOptions
+  ): Promise<SessionTranscriptState>
   /**
    * Attach an in-process MCP server to the spawn options. Used by the
    * host to expose Jack-specific tools to the agent (e.g. partner

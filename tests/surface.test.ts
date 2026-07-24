@@ -43,6 +43,8 @@ import {
   type ProviderDiagnostic,
   type ProviderDiagnosticSeverity,
   type ProviderPolicies,
+  type SessionTranscriptState,
+  type SessionTranscriptStateOptions,
   type SlashCommandDef,
   type SlashCommandScope,
   type SlashCommandSupport,
@@ -546,4 +548,46 @@ test('JackProvider.canonicalModelId is optional and folds same-model ids', () =>
   const noCanon: JackProvider = { ...withCanon, id: 'no-canon' }
   delete (noCanon as { canonicalModelId?: unknown }).canonicalModelId
   assert.equal(noCanon.canonicalModelId, undefined)
+})
+
+test('JackProvider.sessionTranscriptState is optional and tri-state', async () => {
+  // The tri-state is a closed union — asserting the three legal members and
+  // that the conservative `'unknown'` is representable is the whole contract.
+  const states: SessionTranscriptState[] = ['present', 'missing', 'unknown']
+  assert.deepEqual(states, ['present', 'missing', 'unknown'])
+
+  const withState: JackProvider = {
+    id: 'transcript-state',
+    label: 'TranscriptState',
+    detect: async () => ({ installed: true }),
+    backends: [],
+    defaultBackendId: 'sdk',
+    capabilities: {} as CapabilityMatrix,
+    modelDefaults: { oneShot: 'cheap-model' },
+    toolCatalog: [],
+    parseToolName: (rawName) => ({ kind: 'native', toolName: rawName }),
+    applyKnowledgeContext: () => {},
+    readSessionTranscript: async () => [],
+    // A provider that cannot honor a supplied configDir MUST fall back to
+    // 'unknown' rather than probe the wrong root and risk a false 'missing'.
+    sessionTranscriptState: async (opts: SessionTranscriptStateOptions) =>
+      opts.configDir ? 'unknown' : 'present'
+  }
+  assert.equal(
+    await withState.sessionTranscriptState?.({ providerSessionId: 's1' }),
+    'present'
+  )
+  assert.equal(
+    await withState.sessionTranscriptState?.({
+      providerSessionId: 's1',
+      configDir: '/some/pinned/root'
+    }),
+    'unknown'
+  )
+
+  // Presence-based gating: omitting the method means the host treats the
+  // provider as all-'unknown' and never sweeps its sessions.
+  const noState: JackProvider = { ...withState, id: 'no-transcript-state' }
+  delete (noState as { sessionTranscriptState?: unknown }).sessionTranscriptState
+  assert.equal(noState.sessionTranscriptState, undefined)
 })
