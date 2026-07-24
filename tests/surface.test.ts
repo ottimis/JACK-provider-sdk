@@ -47,6 +47,7 @@ import {
   type SlashCommandScope,
   type SlashCommandSupport,
   type SpawnArgs,
+  type TerminalRunSpec,
   type TimeWindowMetric,
   type TokenUtilizationMetric,
   type ToolDescriptor,
@@ -96,6 +97,45 @@ test('SlashCommandDef discriminates by scope', () => {
   if (userFile.scope === 'user' || userFile.scope === 'project') {
     assert.equal(userFile.body, '...')
   }
+})
+
+test('SlashCommandSupport.terminalRun is optional and returns TerminalRunSpec | null', () => {
+  // Omitting terminalRun is valid — providers without a terminal bridge
+  // (Codex, Gemini) leave it undefined and get the legacy refusal.
+  const noBridge: SlashCommandSupport = { builtins: [] }
+  assert.equal(noBridge.terminalRun, undefined)
+
+  const autoRun: TerminalRunSpec = { commandLine: 'claude auth login', autoRun: true }
+  const needsInput: TerminalRunSpec = {
+    commandLine: 'claude plugin install ',
+    autoRun: false
+  }
+  const tuiOnly: TerminalRunSpec = {
+    commandLine: 'claude',
+    autoRun: false,
+    hint: 'then type /config in the session'
+  }
+
+  // When present, the mapping keys off the canonical name (no leading
+  // slash) + rawArgs and returns the union TerminalRunSpec | null.
+  const withBridge: SlashCommandSupport = {
+    builtins: [],
+    terminalRun(name: string, rawArgs: string): TerminalRunSpec | null {
+      if (name === 'login') return autoRun
+      if (name === 'plugin') {
+        return { commandLine: `claude plugin ${rawArgs}`.trimEnd(), autoRun: rawArgs.length > 0 }
+      }
+      if (name === 'config') return tuiOnly
+      return null // not terminal-runnable → host shows "not available"
+    }
+  }
+
+  assert.deepEqual(withBridge.terminalRun?.('login', ''), autoRun)
+  assert.equal(withBridge.terminalRun?.('plugin', '')?.autoRun, false)
+  assert.equal(withBridge.terminalRun?.('plugin', 'install foo')?.autoRun, true)
+  assert.equal(withBridge.terminalRun?.('config', '')?.hint, 'then type /config in the session')
+  assert.equal(withBridge.terminalRun?.('resume', ''), null)
+  assert.equal(needsInput.autoRun, false)
 })
 
 test('SlashCommandScope is open-ended for forward compat', () => {

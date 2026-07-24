@@ -138,6 +138,48 @@ export type ParsedSlashEnvelope = {
 }
 
 /**
+ * How to run a built-in slash command in a host shell terminal, for
+ * built-ins Jack's chat engine cannot execute (interactive / REPL-only:
+ * `/login`, `/config`, `/plugin`, `/mcp`, `/doctor`, `/update`, …).
+ *
+ * Returned by {@link SlashCommandSupport.terminalRun}. The host writes
+ * {@link commandLine} into a freshly-spawned host login shell (the
+ * dev-terminal dock), which is exactly how a human would run it in
+ * iTerm/Terminal.app — this is also what fixes the macOS keychain-ACL
+ * login bug, since `claude auth login` then runs as a child of the dock
+ * shell rather than of Jack.app's control process.
+ */
+export type TerminalRunSpec = {
+  /**
+   * The command line the host types into a host login shell. MUST be
+   * provider CLI syntax — the host never hardcodes it (provider-compliance
+   * rule). Examples: `claude auth login`, `claude plugin`, or a bare
+   * `claude` to drop into the interactive TUI.
+   */
+  commandLine: string
+  /**
+   * Whether the host executes the line immediately or leaves it for the
+   * user to complete:
+   *
+   *   - `true`  → the host appends a newline and runs it right away. Use
+   *     for safe, self-contained commands that need no further input
+   *     (`claude auth login`, `claude doctor`, `claude update`).
+   *   - `false` → the host types the line but does NOT press Enter, so the
+   *     user reviews or completes it first. Use when the command still
+   *     needs arguments the user must supply (`claude plugin install
+   *     <name>`) or when it drops into a TUI the user then drives by hand
+   *     (bare `claude`, then `/config` inside the session).
+   */
+  autoRun: boolean
+  /**
+   * Optional one-line hint the host renders as a chip next to the spawned
+   * terminal tab, e.g. `"then type /config in the session"` for TUI-only
+   * commands whose real action happens after the bare CLI launches.
+   */
+  hint?: string
+}
+
+/**
  * Provider-declared slash-command support. Every field is optional so a
  * partial implementation degrades gracefully — e.g. a provider with
  * builtin commands but no envelope detection just declares
@@ -263,6 +305,31 @@ export type SlashCommandSupport = {
    *     invalidated only on session boundary events.
    */
   subscribeFsChanges?(callback: () => void): () => void
+  /**
+   * Map a built-in slash command that Jack's chat engine can't run
+   * (interactive / REPL-only) to a host-shell command line. The host
+   * calls this when the user invokes such a command in chat and routes
+   * the result to its integrated terminal (the dev-terminal dock), which
+   * runs a real host login shell.
+   *
+   *   - `name`    — the canonical built-in name WITHOUT the leading slash
+   *                 (e.g. `login`, not `/login`).
+   *   - `rawArgs` — everything the user typed after the name (may be an
+   *                 empty string).
+   *   - returns   — the {@link TerminalRunSpec} describing what to run, or
+   *                 `null` when this command is NOT terminal-runnable, in
+   *                 which case the host falls back to its legacy "not
+   *                 available" message.
+   *
+   * The host never hardcodes provider CLI syntax — this method is the
+   * single source of the slash-name → command-line mapping
+   * (provider-compliance rule).
+   *
+   * Optional + presence-based (no {@link CapabilityMatrix} flag): a
+   * provider that omits it gets the legacy refusal behaviour for every
+   * REPL-only command.
+   */
+  terminalRun?(name: string, rawArgs: string): TerminalRunSpec | null
 }
 
 /**
