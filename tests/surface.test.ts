@@ -20,6 +20,9 @@ import {
   type ClientToolHandlerAttachContext,
   type DiagnosticsApi,
   type DiagnosticsInspectContext,
+  type HeadlessAuthApi,
+  type HeadlessAuthCommand,
+  type HeadlessAuthCommandInput,
   type InProcessMcpServerSpec,
   type InProcessMcpToolSpec,
   type JackProvider,
@@ -308,6 +311,70 @@ test('DiagnosticsApi — spawn diagnostics capability surface', () => {
   assert.equal(provider.diagnostics, api)
   assert.equal(diag.severity, 'warning')
   assert.deepEqual(diag.paths, ['/repo/CLAUDE.md'])
+})
+
+test('HeadlessAuthApi — headless login affordance, profile-aware', async () => {
+  // The provider owns the whole string, binary included (TerminalRunSpec
+  // precedent): the host prints it and never composes provider CLI syntax.
+  const api: HeadlessAuthApi = {
+    async command(input: HeadlessAuthCommandInput): Promise<HeadlessAuthCommand> {
+      // Profile-aware: whatever pins the requested profile rides in `env`,
+      // resolved by the provider (Claude: via profiles.applyProfile). The
+      // host never names the variable.
+      return {
+        commandLine: 'claude auth login --claudeai',
+        ...(input.profileId
+          ? { env: { CLAUDE_CONFIG_DIR: `/home/op/.claude-${input.profileId}` } }
+          : {})
+      }
+    },
+    hint: 'prints a URL — open it elsewhere and paste the code back',
+    tokenEnvVar: 'ANTHROPIC_API_KEY'
+  }
+
+  const implicitDefault = await api.command({})
+  assert.equal(implicitDefault.commandLine, 'claude auth login --claudeai')
+  assert.equal(implicitDefault.env, undefined)
+  assert.equal(implicitDefault.cwd, undefined)
+
+  // A node with more than one profile can authenticate each: same command
+  // line, different pinning env.
+  const work = await api.command({ profileId: 'work' })
+  const personal = await api.command({ profileId: 'personal' })
+  assert.equal(work.commandLine, personal.commandLine)
+  assert.notDeepEqual(work.env, personal.env)
+
+  assert.equal(api.tokenEnvVar, 'ANTHROPIC_API_KEY')
+
+  // Presence-based capability: a provider MAY attach it to JackProvider…
+  const provider: Partial<JackProvider> = { headlessAuth: api }
+  assert.equal(provider.headlessAuth, api)
+
+  // …and one that omits it keeps working unchanged — the host simply has no
+  // headless affordance to offer for it.
+  const minimal: JackProvider = {
+    id: 'no-headless-auth',
+    label: 'NoHeadlessAuth',
+    detect: async () => ({ installed: true }),
+    backends: [],
+    defaultBackendId: 'sdk',
+    capabilities: {} as CapabilityMatrix,
+    modelDefaults: { oneShot: 'cheap-model' },
+    toolCatalog: [],
+    parseToolName: (rawName) => ({ kind: 'native', toolName: rawName }),
+    applyKnowledgeContext: () => {},
+    readSessionTranscript: async () => []
+  }
+  assert.equal(minimal.headlessAuth, undefined)
+
+  // `hint` and `tokenEnvVar` are optional too — the interactive out-of-band
+  // flow alone is a complete implementation.
+  const bare: HeadlessAuthApi = {
+    command: async () => ({ commandLine: 'someagent login', cwd: '/srv/app' })
+  }
+  assert.equal(bare.hint, undefined)
+  assert.equal(bare.tokenEnvVar, undefined)
+  assert.equal((await bare.command({ profileId: 'ignored' })).cwd, '/srv/app')
 })
 
 test('InProcessMcpToolSpec.schema is a zod-shape', () => {

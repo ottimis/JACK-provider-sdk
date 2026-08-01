@@ -1,6 +1,6 @@
 {
   "name": "@ottimis/jack-provider-sdk",
-  "version": "0.28.0",
+  "version": "0.29.0",
   "packageManager": "pnpm@11.0.8",
   "description": "Plugin contract for AI provider integrations in Jack — backend interface, capability matrix, spawner primitives, knowledge context. Consumed both by in-tree providers and external packages.",
   "license": "MIT",

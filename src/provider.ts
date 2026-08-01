@@ -25,6 +25,7 @@ import type {
 } from './backend'
 import type { ProviderDefaultsApi } from './defaults'
 import type { DiagnosticsApi } from './diagnostics'
+import type { HeadlessAuthApi } from './headlessAuth'
 import type { HostServices } from './host'
 import type { InteractiveLaunchApi } from './interactiveLaunch'
 import type { OneshotApi } from './oneshot'
@@ -1129,6 +1130,23 @@ export type JackProvider = {
    * Diagnostics are strictly advisory: they never block or fail a spawn.
    */
   diagnostics?: DiagnosticsApi
+  /**
+   * Headless authentication affordance — the command a human runs on a
+   * machine with no browser, no keychain and no display to authenticate this
+   * provider. See {@link HeadlessAuthApi}.
+   *
+   * Consumed by headless hosts (a Jack node, `jackd`), which have no login UI
+   * and can only tell their operator what to run. Distinct from
+   * {@link HostServices.auth.openCookieLoginWindow}, which is irreducibly a
+   * window, and from {@link SlashCommandSupport.terminalRun}, which is a slash
+   * command surface presuming a terminal the node's clients don't have.
+   *
+   * Optional + presence-based, like {@link defaults} / {@link diagnostics}: a
+   * provider that omits the field offers no headless affordance and the host
+   * says nothing about it. No `CapabilityMatrix` flag. The host prints what
+   * this returns and never parses it.
+   */
+  headlessAuth?: HeadlessAuthApi
   /**
    * Provider-declared configuration toggles — boolean settings the host
    * renders as generic on/off controls and persists via the provider. See
