@@ -32,6 +32,7 @@ import type { OneshotApi } from './oneshot'
 import type { ProfilesApi } from './profiles'
 import type { SandboxApi } from './sandbox'
 import type { ProviderSettingsApi } from './settings'
+import type { TranscriptPortabilityApi } from './transcripts'
 import type { UsageApi } from './usage'
 import type { ZodType } from 'zod'
 import type {
@@ -1147,6 +1148,22 @@ export type JackProvider = {
    * this returns and never parses it.
    */
   headlessAuth?: HeadlessAuthApi
+  /**
+   * Transcript portability — move one conversation to another machine and take
+   * one back. See {@link TranscriptPortabilityApi}.
+   *
+   * Consumed by the cross-node handoff (ADR 0023): two hosts that never talk to
+   * each other, so the copy is two halves — one exports, the other imports —
+   * with a client carrying an opaque base64 blob between them. Distinct from
+   * {@link ProfilesApi.transferSession}, which relocates a transcript between
+   * two profiles on **one** filesystem and stays as it is.
+   *
+   * Optional + presence-based, like {@link defaults} / {@link diagnostics}: a
+   * provider that omits the field cannot relocate its conversations, and every
+   * handoff surface goes absent rather than disabled. No `CapabilityMatrix`
+   * flag. The host never inspects what it carries.
+   */
+  transcripts?: TranscriptPortabilityApi
   /**
    * Provider-declared configuration toggles — boolean settings the host
    * renders as generic on/off controls and persists via the provider. See

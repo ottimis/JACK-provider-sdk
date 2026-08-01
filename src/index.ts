@@ -38,6 +38,7 @@ export * from './oneshot'
 export * from './defaults'
 export * from './diagnostics'
 export * from './headlessAuth'
+export * from './transcripts'
 export * from './settings'
 export * from './interactiveLaunch'
 

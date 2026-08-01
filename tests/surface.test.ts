@@ -56,6 +56,9 @@ import {
   type TimeWindowMetric,
   type TokenUtilizationMetric,
   type ToolDescriptor,
+  type TranscriptExportResult,
+  type TranscriptImportResult,
+  type TranscriptPortabilityApi,
   type UsageApi,
   type UsageConnectContext,
   type UsageConnectOption,
@@ -375,6 +378,106 @@ test('HeadlessAuthApi — headless login affordance, profile-aware', async () =>
   assert.equal(bare.hint, undefined)
   assert.equal(bare.tokenEnvVar, undefined)
   assert.equal((await bare.command({ profileId: 'ignored' })).cwd, '/srv/app')
+})
+
+test('TranscriptPortabilityApi — a conversation crosses two machines intact', async () => {
+  // Two hosts that never see each other's disk: each gets its own store, and
+  // the only thing that travels between them is the opaque {format, content}
+  // pair. That separation is the whole reason the call is two halves.
+  const makeMachine = (
+    disk: Map<string, string>,
+    format: string
+  ): TranscriptPortabilityApi => ({
+    async exportSession(input): Promise<TranscriptExportResult> {
+      // Profile omitted = the runtime's implicit default, exactly as with
+      // `applyProfile` — the provider owns that resolution, not the host.
+      const key = `${input.profileId ?? 'default'}:${input.projectPath}:${input.providerSessionId}`
+      const raw = disk.get(key)
+      // Missing transcript is a returned error, never a throw: the message is
+      // going to reach a human.
+      if (raw === undefined) return { ok: false, error: `no transcript for ${key}` }
+      return { ok: true, format, content: Buffer.from(raw, 'utf8').toString('base64') }
+    },
+    async importSession(input): Promise<TranscriptImportResult> {
+      // The hard semantic: refuse a format we cannot resume rather than write
+      // a file that looks like a session and is not one.
+      if (input.format !== format) {
+        return { ok: false, error: `unsupported transcript format: ${input.format}` }
+      }
+      const key = `${input.profileId ?? 'default'}:${input.projectPath}:${input.newProviderSessionId}`
+      disk.set(key, Buffer.from(input.content, 'base64').toString('utf8'))
+      return { ok: true }
+    }
+  })
+
+  const laptopDisk = new Map([['default:/repo:sess-a', '{"turn":1}\n{"turn":2}\n']])
+  const nodeDisk = new Map<string, string>()
+  const laptop = makeMachine(laptopDisk, 'claude-jsonl@1')
+  const node = makeMachine(nodeDisk, 'claude-jsonl@1')
+
+  const exported = await laptop.exportSession({
+    providerSessionId: 'sess-a',
+    projectPath: '/repo'
+  })
+  assert.equal(exported.ok, true)
+  if (!exported.ok) return
+
+  // The host carries this and looks inside neither field.
+  const carried = { format: exported.format, content: exported.content }
+
+  const imported = await node.importSession({
+    newProviderSessionId: 'sess-b',
+    // Canonical cwd on the TARGET machine — the working tree does not travel.
+    projectPath: '/srv/checkout',
+    ...carried
+  })
+  assert.deepEqual(imported, { ok: true })
+  // Byte-identical on the far side: fidelity is the point of a handoff.
+  assert.equal(nodeDisk.get('default:/srv/checkout:sess-b'), '{"turn":1}\n{"turn":2}\n')
+  // Export is read-only — the source is still resumable until the host
+  // archives it, which is what makes an interrupted move recoverable.
+  assert.equal(laptopDisk.size, 1)
+
+  // A provider that speaks a different dialect refuses instead of writing a
+  // dead session.
+  const otherRuntime = makeMachine(new Map(), 'codex-log@2')
+  const refused = await otherRuntime.importSession({
+    newProviderSessionId: 'sess-c',
+    projectPath: '/srv/checkout',
+    ...carried
+  })
+  assert.equal(refused.ok, false)
+  if (refused.ok) return
+  assert.match(refused.error, /unsupported transcript format/)
+
+  // Missing source: `{ok:false}`, not a rejection.
+  const missing = await laptop.exportSession({
+    providerSessionId: 'nope',
+    projectPath: '/repo',
+    profileId: 'work'
+  })
+  assert.equal(missing.ok, false)
+
+  // Presence-based capability: a provider MAY attach it to JackProvider…
+  const provider: Partial<JackProvider> = { transcripts: laptop }
+  assert.equal(provider.transcripts, laptop)
+
+  // …and one that omits it stays valid — the host then renders no move
+  // affordance at all (absent, not disabled).
+  const minimal: JackProvider = {
+    id: 'no-transcripts',
+    label: 'NoTranscripts',
+    detect: async () => ({ installed: true }),
+    backends: [],
+    defaultBackendId: 'sdk',
+    capabilities: {} as CapabilityMatrix,
+    modelDefaults: { oneShot: 'cheap-model' },
+    toolCatalog: [],
+    parseToolName: (rawName) => ({ kind: 'native', toolName: rawName }),
+    applyKnowledgeContext: () => {},
+    readSessionTranscript: async () => []
+  }
+  assert.equal(minimal.transcripts, undefined)
 })
 
 test('InProcessMcpToolSpec.schema is a zod-shape', () => {
