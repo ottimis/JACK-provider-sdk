@@ -186,6 +186,7 @@ Replaces direct calls to the provider's SDK that used to be sprinkled across the
 |---|---|
 | `prepareSpawnOptions` | You need to write `providerSpawnHints` for packaged builds (e.g. asar-unpacked path). |
 | `attachInProcessMcpServer` | Your SDK supports in-process MCP (Claude `createSdkMcpServer`). If not, omit it: the host degrades — pair-mode reviewers don't get Jack's tools. |
+| `capabilities.mcpImageResults` | Set it only once you have verified on the wire that `image` blocks returned by an in-process MCP tool (`InProcessMcpContentBlock`) reach the model. Absent/false ⇒ the host keeps those tools text-only. |
 | `attachClientToolHandler` | **Pattern B only.** The host injects the handler at session start. Store the reference and use it when wire requests arrive for fs/terminal/tools. |
 | `slashCommands` | You have a `/command` UX. Discriminate `builtins` / `scanCommands` / `subscribeToWireCommands` / `parseEnvelope`. |
 | `persistedPermissions` | You persist permission rules on disk (Claude's `.claude/settings*.json`). Sandbox-only models (Codex) leave it undefined. |

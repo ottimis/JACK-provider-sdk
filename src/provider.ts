@@ -645,6 +645,17 @@ export type CapabilityMatrix = {
    * and Gemini leave it undefined.
    */
   cacheTtlMs?: number
+  /**
+   * The provider forwards `image` content blocks of in-process MCP tool
+   * results (see {@link InProcessMcpContentBlock}) to the model.
+   * Absent/false ⇒ the host sends text only — the browser screenshot
+   * tool then returns a file path instead of pixels.
+   *
+   * Optional so external providers need no change: only a provider that
+   * has verified image blocks travel end-to-end on its wire should set
+   * it to `true`.
+   */
+  mcpImageResults?: boolean
 }
 
 /**
@@ -1385,8 +1396,31 @@ export type InProcessMcpToolSpec = {
    * to stuff JSON Schema here would silently break Claude's wrapper.
    */
   schema: Record<string, ZodType>
+  /**
+   * Produces the MCP `content` blocks the model sees. Text blocks work
+   * everywhere; `image` blocks reach the model only on providers that
+   * declare {@link CapabilityMatrix.mcpImageResults} — the host is
+   * expected to degrade a tool to text-only (e.g. a screenshot tool
+   * returning the file path instead of pixels) when the flag is absent.
+   */
   handler: (args: Record<string, unknown>) => Promise<{
-    content: Array<{ type: 'text'; text: string }>
+    content: InProcessMcpContentBlock[]
     isError?: boolean
   }>
 }
+
+/**
+ * A single MCP `content` block an {@link InProcessMcpToolSpec.handler}
+ * may return. Mirrors the subset of the MCP `tools/call` result shape
+ * Jack actually forwards:
+ *
+ *   - `text` — universally supported.
+ *   - `image` — base64 payload + its mime type (e.g. `image/png`), for
+ *     tools that produce pixels (the agent browser's screenshot). Only
+ *     providers declaring {@link CapabilityMatrix.mcpImageResults} pass
+ *     these through to the model; the rest see them dropped or rejected,
+ *     so a tool that can emit images MUST have a text-only fallback.
+ */
+export type InProcessMcpContentBlock =
+  | { type: 'text'; text: string }
+  | { type: 'image'; data: string; mimeType: string }

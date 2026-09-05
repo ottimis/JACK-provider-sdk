@@ -23,6 +23,7 @@ import {
   type HeadlessAuthApi,
   type HeadlessAuthCommand,
   type HeadlessAuthCommandInput,
+  type InProcessMcpContentBlock,
   type InProcessMcpServerSpec,
   type InProcessMcpToolSpec,
   type JackProvider,
@@ -493,6 +494,61 @@ test('InProcessMcpToolSpec.schema is a zod-shape', () => {
     name: 'jack', version: '1.0.0', tools: [tool]
   }
   assert.equal(server.tools[0]?.name, 'echo')
+})
+
+test('InProcessMcpToolSpec.handler may return image content blocks', () => {
+  const png = 'iVBORw0KGgo='
+  const screenshot: InProcessMcpToolSpec = {
+    name: 'jack_browser_screenshot',
+    description: 'captures the browser tab',
+    schema: { path: z.string().optional() },
+    handler: async () => ({
+      content: [
+        { type: 'text', text: '/tmp/shot.png' },
+        { type: 'image', data: png, mimeType: 'image/png' }
+      ]
+    })
+  }
+  // Text-only handlers keep type-checking (no migration for existing tools).
+  const textOnly: InProcessMcpToolSpec = {
+    name: 'echo',
+    description: 'echoes input',
+    schema: {},
+    handler: async () => ({ content: [{ type: 'text', text: 'ok' }] })
+  }
+  const blocks: InProcessMcpContentBlock[] = [
+    { type: 'text', text: 'hi' },
+    { type: 'image', data: png, mimeType: 'image/png' }
+  ]
+  assert.equal(blocks.length, 2)
+  assert.equal(screenshot.name, 'jack_browser_screenshot')
+  assert.equal(textOnly.name, 'echo')
+})
+
+test('CapabilityMatrix.mcpImageResults is optional and defaults to absent', () => {
+  const base: CapabilityMatrix = {
+    partialMessages: false,
+    hooks: { PreToolUse: false, PostToolUse: false },
+    planMode: false,
+    askUserQuestion: false,
+    subagents: 'none',
+    mcp: true,
+    structuredPatch: false,
+    resumeSession: false,
+    liveModelSwitch: false,
+    liveEffortSwitch: false,
+    livePermissionModeSwitch: false,
+    permissionGranularity: 'callback',
+    usage: false,
+    profiles: false,
+    sandbox: false,
+    oneshot: false,
+    permissionModes: ['default']
+  }
+  // Absent ⇒ host sends text only.
+  assert.equal(base.mcpImageResults, undefined)
+  const withImages: CapabilityMatrix = { ...base, mcpImageResults: true }
+  assert.equal(withImages.mcpImageResults, true)
 })
 
 test('BackendName is an open string union', () => {
