@@ -551,6 +551,34 @@ test('CapabilityMatrix.mcpImageResults is optional and defaults to absent', () =
   assert.equal(withImages.mcpImageResults, true)
 })
 
+test('CapabilityMatrix.authoritativeIdle is optional and defaults to absent', () => {
+  const base: CapabilityMatrix = {
+    partialMessages: false,
+    hooks: { PreToolUse: false, PostToolUse: false },
+    planMode: false,
+    askUserQuestion: false,
+    subagents: 'none',
+    mcp: true,
+    structuredPatch: false,
+    resumeSession: false,
+    liveModelSwitch: false,
+    liveEffortSwitch: false,
+    livePermissionModeSwitch: false,
+    permissionGranularity: 'callback',
+    usage: false,
+    profiles: false,
+    sandbox: false,
+    oneshot: false,
+    permissionModes: ['default']
+  }
+  // Absent ⇒ host counts prompts against `turn_result`.
+  assert.equal(base.authoritativeIdle, undefined)
+  const authoritative: CapabilityMatrix = { ...base, authoritativeIdle: true }
+  assert.equal(authoritative.authoritativeIdle, true)
+  const counted: CapabilityMatrix = { ...base, authoritativeIdle: false }
+  assert.equal(counted.authoritativeIdle, false)
+})
+
 test('BackendName is an open string union', () => {
   const claudeSdk: BackendName = 'sdk'
   const claudeCli: BackendName = 'cli'

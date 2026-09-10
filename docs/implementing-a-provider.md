@@ -187,6 +187,7 @@ Replaces direct calls to the provider's SDK that used to be sprinkled across the
 | `prepareSpawnOptions` | You need to write `providerSpawnHints` for packaged builds (e.g. asar-unpacked path). |
 | `attachInProcessMcpServer` | Your SDK supports in-process MCP (Claude `createSdkMcpServer`). If not, omit it: the host degrades — pair-mode reviewers don't get Jack's tools. |
 | `capabilities.mcpImageResults` | Set it only once you have verified on the wire that `image` blocks returned by an in-process MCP tool (`InProcessMcpContentBlock`) reach the model. Absent/false ⇒ the host keeps those tools text-only. |
+| `capabilities.authoritativeIdle` | The component that owns your prompt queue emits `session_state: 'idle'` only once every handed-over prompt is served (prompts merged into a running turn included) and no subagent remains. The host then settles the turn and arms eviction on idle. A per-thread idle that can fire between two queued turns does not qualify. Absent/false ⇒ the host counts prompts against `turn_result`. |
 | `attachClientToolHandler` | **Pattern B only.** The host injects the handler at session start. Store the reference and use it when wire requests arrive for fs/terminal/tools. |
 | `slashCommands` | You have a `/command` UX. Discriminate `builtins` / `scanCommands` / `subscribeToWireCommands` / `parseEnvelope`. |
 | `persistedPermissions` | You persist permission rules on disk (Claude's `.claude/settings*.json`). Sandbox-only models (Codex) leave it undefined. |

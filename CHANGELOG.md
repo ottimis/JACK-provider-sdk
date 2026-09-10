@@ -2,7 +2,7 @@
 
 All notable changes to `@ottimis/jack-provider-sdk` will be documented in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.30.0] — 2026-09-05
+## [0.30.0] — 2026-09-10
 
 ### Added
 
@@ -11,7 +11,11 @@ Image content blocks in in-process MCP tool results — lets a tool return pixel
 - `InProcessMcpContentBlock` — new exported union for what an `InProcessMcpToolSpec.handler` returns: `{ type: 'text'; text }` or `{ type: 'image'; data: <base64>; mimeType }`. `handler` is now typed as `Promise<{ content: InProcessMcpContentBlock[]; isError?: boolean }>` — a widening, so existing text-only handlers keep compiling.
 - `CapabilityMatrix.mcpImageResults?: boolean` — the provider forwards `image` blocks of in-process MCP tool results to the model. Optional (external providers need no change); absent/false ⇒ the host sends text only and a pixel-producing tool must fall back to its text form. Declare it only after verifying image blocks travel end-to-end on the provider's wire.
 
-No breaking changes — both additions are additive.
+Authoritative idle — lets the host settle a turn on the provider's idle instead of counting prompts against `turn_result`, which breaks when the runtime merges a mid-turn prompt into the running turn (no own `turn_result` ⇒ the prompt stays in flight forever and idle eviction never fires).
+
+- `CapabilityMatrix.authoritativeIdle?: boolean` — the provider emits `session_state: 'idle'` only once every prompt handed to the backend has been served (merged prompts included) and no background work remains. The host then clears its in-flight prompts, settles the turn and arms idle eviction on idle. Absent/false ⇒ the host keeps counting prompts against `turn_result`, exactly as before. Declare it only if the component that owns the prompt queue emits the idle — a runtime-level "thread idle" that can fire between two queued turns does not qualify. Host contract: `_shared/api/provider-authoritative-idle.md`.
+
+No breaking changes — every addition is additive.
 
 ## [0.16.0] — 2026-05-19
 

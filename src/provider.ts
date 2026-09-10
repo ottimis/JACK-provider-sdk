@@ -656,6 +656,19 @@ export type CapabilityMatrix = {
    * it to `true`.
    */
   mcpImageResults?: boolean
+  /**
+   * The provider emits `session_state: 'idle'` only when every prompt handed
+   * to the backend has been served — including prompts it merged into a
+   * running turn — and no background work (subagents) remains. The host then
+   * treats idle as the turn-over signal: it clears its in-flight prompts,
+   * settles the turn and arms idle eviction. Absent/false ⇒ the host counts
+   * prompts against `turn_result`.
+   *
+   * Declare it only if the component that owns the prompt queue emits the
+   * idle: a runtime-level "thread idle" that can fire between two queued
+   * turns does not qualify.
+   */
+  authoritativeIdle?: boolean
 }
 
 /**
