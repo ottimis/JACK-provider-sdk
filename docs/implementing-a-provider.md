@@ -193,6 +193,7 @@ Replaces direct calls to the provider's SDK that used to be sprinkled across the
 | `persistedPermissions` | You persist permission rules on disk (Claude's `.claude/settings*.json`). Sandbox-only models (Codex) leave it undefined. |
 | `usage` | You have a billing/quota endpoint. See `src/usage.ts` for `UsageApi`. The `usage` capability flag must reflect whether this field is present. |
 | `activate(host)` | You need KV storage or auth flows. The host hands you `HostServices`, namespaced per provider. **Idempotent** — `activate` may be called twice. |
+| `host.fileCache` | Your `listSessions` derives values from files on disk (transcripts, rollouts). Route each parse through `getOrCompute(absPath, PARSER_VERSION, compute)` so unchanged files are not re-read, and `prune(root, seenPaths)` after a complete scan. **Optional on the host** — guard with `host.fileCache ? … : await compute()`. Bump `PARSER_VERSION` whenever the derived shape changes, and keep the cached output identical to the uncached one. |
 | `policies` | You have non-trivial rules about how the host should treat your content (user-content sanitization, etc.). |
 
 ### 3.8 `modelDefaults` + `branding` + `modelOptions` / `effortLevels`

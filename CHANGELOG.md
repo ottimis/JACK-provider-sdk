@@ -2,6 +2,18 @@
 
 All notable changes to `@ottimis/jack-provider-sdk` will be documented in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.31.0] — 2026-09-18
+
+### Added
+
+Host-owned cache of values providers derive from files — lets session discovery skip re-reading and re-parsing transcripts that have not changed on disk. The provider keeps owning *where* its files are and *how* to parse them; the host owns deciding whether it already has the answer. Type declarations only, no runtime code.
+
+- `HostJsonValue` — the JSON-serializable union the host can persist on a provider's behalf.
+- `HostFileDerivedCache` — `getOrCompute(filePath, version, compute)` and `prune(root, livePaths)`. Invalidation key is the file's **mtime + size + `version`**: a hit returns the stored value without calling `compute`, a miss stores `compute()`'s result against the `stat` taken before it ran. `null` is stored like any value ("not a session" is remembered too); a failing `stat` drops the row, skips `compute` and returns `null`; a throwing `compute` stores nothing and propagates. `version` is the provider's parser version — **bump it whenever the shape or derivation of the value changes**, or rows written by the old parser keep being served.
+- `HostServices.fileCache?: HostFileDerivedCache` — optional, **absent on hosts that predate it**: providers guard and fall back to computing directly. Existing `HostServices` fields are untouched. Host contract: `_shared/api/host-file-cache.md`.
+
+No breaking changes — every addition is additive.
+
 ## [0.30.0] — 2026-09-10
 
 ### Added

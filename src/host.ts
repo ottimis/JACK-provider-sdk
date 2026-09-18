@@ -137,6 +137,81 @@ export type HostAuthService = {
 }
 
 /**
+ * JSON-serializable value — what the host can persist on the provider's
+ * behalf in {@link HostFileDerivedCache}. Anything outside this union
+ * (a `Date`, a `Map`, a class instance, `undefined`) doesn't survive the
+ * round-trip through the host's store, so providers derive plain data.
+ */
+export type HostJsonValue =
+  | null
+  | boolean
+  | number
+  | string
+  | HostJsonValue[]
+  | { [key: string]: HostJsonValue }
+
+/**
+ * Cache of values a provider derives from a file — e.g. the session summary
+ * parsed out of a transcript — invalidated by the file's identity on disk.
+ * Scoped per provider by the host, like {@link HostServices.kv}, and keyed by
+ * (provider id, absolute path).
+ *
+ * Why it exists: session discovery re-reads and re-parses every transcript on
+ * disk on every request, while the files rarely change. The provider keeps
+ * owning *where* its files live and *how* to parse them (formats are
+ * provider-specific); the host owns deciding whether it already has the
+ * answer — it `stat`s, compares, persists, and prunes.
+ *
+ * Semantics, in short:
+ *
+ *   - **Hit** — `stat` succeeds and `mtimeMs`, `size` and `version` all match
+ *     the stored row ⇒ the stored value is returned and `compute` is NOT called.
+ *   - **Miss** — `compute()` runs; its result is stored against the `stat`
+ *     taken *before* it ran, then returned.
+ *   - **`null` result** — stored like any other value: "this file is not a
+ *     session" (a sidechain, say) is remembered too.
+ *   - **`stat` fails** — the row is dropped, `compute` is NOT called, `null`
+ *     is returned.
+ *   - **`compute` throws** — nothing is stored and the error propagates to
+ *     the caller; errors are never cached.
+ *   - **Oversized value** — returned but not stored (the host caps the
+ *     serialized size), so it recomputes every time: keep entries small.
+ *   - **Concurrent identical calls** share one `compute`.
+ *   - **File changed during `compute`** — the row carries the older `stat`, so
+ *     the next call misses and recomputes: at worst one extra parse, never a
+ *     stale value kept.
+ *
+ * Contract: `_shared/api/host-file-cache.md`.
+ */
+export type HostFileDerivedCache = {
+  /**
+   * Return the value stored for `filePath` when the file's mtime and size and
+   * the given `version` are unchanged; otherwise run `compute`, store its
+   * result and return it.
+   *
+   * `filePath` must be an absolute path and is compared as given — pass the
+   * same path the provider actually reads, or the same file cached under two
+   * spellings occupies two rows.
+   *
+   * `version` is the provider's parser version. **Bump it whenever the shape
+   * or the derivation of the value changes**, otherwise rows written by the
+   * old parser keep being served for unchanged files.
+   */
+  getOrCompute<T extends HostJsonValue>(
+    filePath: string,
+    version: string,
+    compute: () => Promise<T | null>
+  ): Promise<T | null>
+  /**
+   * Forget the entries under `root` whose path is not in `livePaths` — call it
+   * after a *complete* scan of `root` so deleted files don't accumulate.
+   * Calling it after a partial scan drops entries that are still live (they
+   * are recomputed on the next hit, so it costs time, not correctness).
+   */
+  prune(root: string, livePaths: Iterable<string>): Promise<void>
+}
+
+/**
  * The bag of host services injected into a provider via
  * {@link JackProvider.activate}. Providers store the reference and
  * pull primitives lazily.
@@ -173,4 +248,20 @@ export type HostServices = {
    * profile_id = ?`.
    */
   profileUsageCount?(profileId: string): number
+  /**
+   * Cache of values derived from files on disk (transcripts, rollouts),
+   * keyed by the file's mtime + size + a provider-supplied parser version.
+   *
+   * Optional: **absent on hosts that predate it** — providers must guard and
+   * fall back to computing directly:
+   *
+   * ```ts
+   * const info = host.fileCache
+   *   ? await host.fileCache.getOrCompute(file, PARSER_VERSION, () => parse(file))
+   *   : await parse(file)
+   * ```
+   *
+   * The cached output must be identical to the uncached one.
+   */
+  fileCache?: HostFileDerivedCache
 }

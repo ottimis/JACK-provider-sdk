@@ -23,6 +23,9 @@ import {
   type HeadlessAuthApi,
   type HeadlessAuthCommand,
   type HeadlessAuthCommandInput,
+  type HostFileDerivedCache,
+  type HostJsonValue,
+  type HostServices,
   type InProcessMcpContentBlock,
   type InProcessMcpServerSpec,
   type InProcessMcpToolSpec,
@@ -844,4 +847,63 @@ test('JackProvider.sessionTranscriptState is optional and tri-state', async () =
   const noState: JackProvider = { ...withState, id: 'no-transcript-state' }
   delete (noState as { sessionTranscriptState?: unknown }).sessionTranscriptState
   assert.equal(noState.sessionTranscriptState, undefined)
+})
+
+test('HostServices.fileCache is optional and cache semantics typecheck', () => {
+  const kv = null as unknown as HostServices['kv']
+  const auth = null as unknown as HostServices['auth']
+
+  // Older hosts don't expose it — providers guard and compute directly.
+  const legacy: HostServices = { kv, auth }
+  assert.equal(legacy.fileCache, undefined)
+
+  const store = new Map<string, { version: string; value: HostJsonValue }>()
+  const fileCache: HostFileDerivedCache = {
+    async getOrCompute(filePath, version, compute) {
+      const hit = store.get(filePath)
+      // Invalidation key is (mtime, size, version); the fake only models
+      // `version` since it has no disk behind it.
+      if (hit && hit.version === version) return hit.value as never
+      const value = await compute()
+      store.set(filePath, { version, value })
+      return value
+    },
+    async prune(root, livePaths) {
+      const live = new Set(livePaths)
+      for (const key of [...store.keys()]) {
+        if (key.startsWith(root) && !live.has(key)) store.delete(key)
+      }
+    }
+  }
+  const modern: HostServices = { kv, auth, fileCache }
+
+  type Derived = { title: string; cwd: string }
+  let computes = 0
+  const compute = async (): Promise<Derived | null> => {
+    computes += 1
+    return { title: 'one', cwd: '/w' }
+  }
+
+  return (async () => {
+    const first = await modern.fileCache?.getOrCompute('/t/a.jsonl', '1', compute)
+    const second = await modern.fileCache?.getOrCompute('/t/a.jsonl', '1', compute)
+    assert.deepEqual(second, first)
+    assert.equal(computes, 1)
+
+    // A bumped parser version invalidates rows written by the old parser.
+    await modern.fileCache?.getOrCompute('/t/a.jsonl', '2', compute)
+    assert.equal(computes, 2)
+
+    // `null` is a cached value ("not a session"), not a miss.
+    const notASession = await modern.fileCache?.getOrCompute(
+      '/t/b.jsonl',
+      '1',
+      async () => null
+    )
+    assert.equal(notASession, null)
+
+    await modern.fileCache?.prune('/t', ['/t/a.jsonl'])
+    assert.equal(store.has('/t/b.jsonl'), false)
+    assert.equal(store.has('/t/a.jsonl'), true)
+  })()
 })
