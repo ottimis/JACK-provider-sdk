@@ -2,6 +2,17 @@
 
 All notable changes to `@ottimis/jack-provider-sdk` will be documented in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.32.0] — 2026-09-25
+
+### Added
+
+Update affordance on `detect()` — lets the host offer an "Update" action for an installed runtime without composing the command itself (the `installCommand` precedent, now on the other branch). Type declarations only, no runtime code.
+
+- `ProviderDetectResult` (`installed: true`) `version?: string` — runtime version, display only: rendered verbatim, never compared or parsed by the host. Replaces stashing it in the uninterpreted `details` bag.
+- `ProviderDetectResult` (`installed: true`) `updateCommand?: string` — single-line shell command that updates the installed runtime in place (e.g. `claude update`, `npm install -g @openai/codex@latest`). Same contract as `installCommand`: full provider CLI syntax, typed into a shell by the host, never composed or parsed by it.
+
+The `installed: false` branch is unchanged. No breaking changes — both fields are optional.
+
 ## [0.31.0] — 2026-09-18
 
 ### Added

@@ -734,6 +734,15 @@ export type ProviderDetectResult =
       signInCommand?: string
       /** External docs URL for the auth flow when distinct from install docs. */
       authDocsUrl?: string
+      /** Runtime version, display only — rendered verbatim, never compared or parsed by the host. */
+      version?: string
+      /**
+       * Single-line shell command that updates the installed runtime in place
+       * (e.g. `claude update`, `npm install -g @openai/codex@latest`). Same
+       * contract as `installCommand`: full provider CLI syntax, typed into a
+       * shell by the host, never composed or parsed by it.
+       */
+      updateCommand?: string
       details?: Record<string, unknown>
     }
   | {

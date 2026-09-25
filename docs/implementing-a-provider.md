@@ -71,10 +71,14 @@ async detect(): Promise<ProviderDetectResult> {
     installed: true,
     authenticated: authed,
     authReason: authed ? undefined : 'Credentials expired',
-    signInCommand: 'myagent login'
+    signInCommand: 'myagent login',
+    version: await readVersion(path),
+    updateCommand: 'npm install -g @vendor/myagent@latest'
   }
 }
 ```
+
+**`version` / `updateCommand`** (optional, `installed: true` only): `version` is display-only — the host renders it verbatim next to the Update button and never compares or parses it. `updateCommand` follows the `installCommand` contract: a single-line shell command in full provider CLI syntax that the host types into a shell on the node, never composing or parsing it. Omit either when you can't provide it cheaply.
 
 **Three states for `authenticated`**: `true` / `false` / omitted. Omit it when the provider doesn't model auth (e.g. self-contained SDK). Use `false` only when you can distinguish it from `true` with a quick check — never block startup on a slow probe.
 
