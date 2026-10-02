@@ -1282,6 +1282,13 @@ export type InProcessMcpServerSpec = {
   name: string
   version: string
   tools: InProcessMcpToolSpec[]
+  /**
+   * Same contract as {@link McpServerSpec}'s `toolTimeoutMs`: the longest a
+   * single tool call on this server may legitimately take, in ms. Providers
+   * with a per-call timeout raise theirs to at least this value; providers
+   * without one ignore it.
+   */
+  toolTimeoutMs?: number
 }
 
 /**
@@ -1424,11 +1431,33 @@ export type InProcessMcpToolSpec = {
    * declare {@link CapabilityMatrix.mcpImageResults} — the host is
    * expected to degrade a tool to text-only (e.g. a screenshot tool
    * returning the file path instead of pixels) when the flag is absent.
+   *
+   * `ctx` is optional and may be omitted entirely — see
+   * {@link InProcessMcpToolCallContext}.
    */
-  handler: (args: Record<string, unknown>) => Promise<{
+  handler: (
+    args: Record<string, unknown>,
+    ctx?: InProcessMcpToolCallContext
+  ) => Promise<{
     content: InProcessMcpContentBlock[]
     isError?: boolean
   }>
+}
+
+/**
+ * Per-call context a provider passes as the second argument of
+ * {@link InProcessMcpToolSpec.handler}.
+ */
+export type InProcessMcpToolCallContext = {
+  /**
+   * Aborted when the provider abandons the call (user interrupt, per-call
+   * timeout, session teardown) — e.g. Claude forwards the
+   * `createSdkMcpServer` handler's `extra.signal`. A handler that waits on
+   * something long (a human review) should stop waiting and release its
+   * resources when it fires. A provider that cannot observe cancellation
+   * never passes `signal`; handlers must not rely on it being present.
+   */
+  signal?: AbortSignal
 }
 
 /**

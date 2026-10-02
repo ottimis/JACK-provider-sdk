@@ -83,9 +83,25 @@ export type AgentSystemPrompt =
  * the bag for telemetry / preview without double-translating.
  */
 export type McpServerSpec =
-  | { type: 'stdio'; command: string; args?: string[]; env?: Record<string, string> }
-  | { type: 'http'; url: string; headers?: Record<string, string> }
-  | { type: 'sse'; url: string; headers?: Record<string, string> }
+  | ({ type: 'stdio'; command: string; args?: string[]; env?: Record<string, string> } & McpServerCallLimits)
+  | ({ type: 'http'; url: string; headers?: Record<string, string> } & McpServerCallLimits)
+  | ({ type: 'sse'; url: string; headers?: Record<string, string> } & McpServerCallLimits)
+
+/**
+ * Per-server call limits shared by every {@link McpServerSpec} variant and
+ * by `InProcessMcpServerSpec`.
+ */
+export type McpServerCallLimits = {
+  /**
+   * The longest a single tool call on this server may legitimately take,
+   * in milliseconds — e.g. a tool that waits for a human to review a card.
+   * Providers that enforce a per-call timeout (Codex `tool_timeout_sec`)
+   * should raise theirs to at least this value for this server. A provider
+   * without a per-call timeout ignores the field. Absent ⇒ the provider's
+   * own default applies.
+   */
+  toolTimeoutMs?: number
+}
 
 /**
  * Reasoning-effort knob. Provider-validated; not all providers honor every

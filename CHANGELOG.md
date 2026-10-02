@@ -2,6 +2,18 @@
 
 All notable changes to `@ottimis/jack-provider-sdk` will be documented in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.33.0] — 2026-10-02
+
+### Added
+
+Long-running MCP tool calls — lets a tool wait inside its handler for minutes or hours (Jack's `jack_git_commit` / `jack_git_merge` wait for the human to review a card) without the provider timing it out, and lets the handler learn when the provider gives up on the call. Type declarations only, no runtime code.
+
+- `McpServerCallLimits` — `{ toolTimeoutMs?: number }`, intersected into all three `McpServerSpec` variants (`stdio` / `http` / `sse`): the longest a single tool call on this server may legitimately take. Providers that enforce a per-call timeout (Codex `mcp_servers.<id>.tool_timeout_sec`, default 60 s) raise theirs to at least this value; providers without one ignore it.
+- `InProcessMcpServerSpec.toolTimeoutMs?: number` — same contract for in-process servers.
+- `InProcessMcpToolCallContext` — `{ signal?: AbortSignal }`, passed as the new optional second argument of `InProcessMcpToolSpec.handler(args, ctx?)`. The signal is aborted when the provider abandons the call (interrupt, timeout, teardown); Claude forwards the `createSdkMcpServer` handler's `extra.signal`. A provider that cannot observe cancellation never passes `signal`.
+
+No breaking changes — existing handlers that take `args` only keep compiling, and every new field is optional.
+
 ## [0.32.0] — 2026-09-25
 
 ### Added

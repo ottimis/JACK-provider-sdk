@@ -28,9 +28,11 @@ import {
   type HostServices,
   type InProcessMcpContentBlock,
   type InProcessMcpServerSpec,
+  type InProcessMcpToolCallContext,
   type InProcessMcpToolSpec,
   type JackProvider,
   type KnowledgeContext,
+  type McpServerCallLimits,
   type McpServerSpec,
   type MonthlySpendMetric,
   type ParsedSlashEnvelope,
@@ -526,6 +528,49 @@ test('InProcessMcpToolSpec.handler may return image content blocks', () => {
   assert.equal(blocks.length, 2)
   assert.equal(screenshot.name, 'jack_browser_screenshot')
   assert.equal(textOnly.name, 'echo')
+})
+
+test('McpServerSpec variants and InProcessMcpServerSpec accept optional toolTimeoutMs', () => {
+  const hour = 60 * 60 * 1000
+  const specs: McpServerSpec[] = [
+    { type: 'stdio', command: 'mcp-bin', toolTimeoutMs: hour },
+    { type: 'http', url: 'https://example.com', toolTimeoutMs: hour },
+    { type: 'sse', url: 'https://example.com/sse', toolTimeoutMs: hour },
+    { type: 'http', url: 'https://example.com' }
+  ]
+  const limits: McpServerCallLimits = {}
+  const server: InProcessMcpServerSpec = {
+    name: 'jack', version: '1.0.0', tools: [], toolTimeoutMs: hour
+  }
+  assert.equal(specs[0]?.toolTimeoutMs, hour)
+  assert.equal(specs[3]?.toolTimeoutMs, undefined)
+  assert.equal(limits.toolTimeoutMs, undefined)
+  assert.equal(server.toolTimeoutMs, hour)
+})
+
+test('InProcessMcpToolSpec.handler receives an optional abort signal', async () => {
+  const waiting: InProcessMcpToolSpec = {
+    name: 'jack_git_commit',
+    description: 'waits for the human review',
+    schema: {},
+    handler: (_args, ctx) => new Promise((resolve) => {
+      ctx?.signal?.addEventListener('abort', () =>
+        resolve({ content: [{ type: 'text', text: 'cancelled' }], isError: true })
+      )
+    })
+  }
+  const controller = new AbortController()
+  const ctx: InProcessMcpToolCallContext = { signal: controller.signal }
+  const pending = waiting.handler({}, ctx)
+  controller.abort()
+  const res = await pending
+  assert.equal(res.isError, true)
+  // Providers that cannot observe cancellation call with args only.
+  const echo: InProcessMcpToolSpec = {
+    name: 'echo', description: '', schema: {},
+    handler: async (args) => ({ content: [{ type: 'text', text: JSON.stringify(args) }] })
+  }
+  assert.equal((await echo.handler({ a: 1 })).content.length, 1)
 })
 
 test('CapabilityMatrix.mcpImageResults is optional and defaults to absent', () => {
