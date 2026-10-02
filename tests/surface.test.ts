@@ -10,6 +10,7 @@ import {
   type AgentForkSessionOptions,
   type AgentListSessionsOptions,
   type AgentPermissionMode,
+  type AgentPermissionPrompts,
   type AgentQueryOptions,
   type AgentSession,
   type AgentSettingsResponse,
@@ -35,6 +36,8 @@ import {
   type McpServerCallLimits,
   type McpServerSpec,
   type MonthlySpendMetric,
+  type NormalizedElicitationRequest,
+  type NormalizedElicitationResult,
   type ParsedSlashEnvelope,
   type PermissionBehavior,
   type PermissionRule,
@@ -951,4 +954,137 @@ test('HostServices.fileCache is optional and cache semantics typecheck', () => {
     assert.equal(store.has('/t/b.jsonl'), false)
     assert.equal(store.has('/t/a.jsonl'), true)
   })()
+})
+
+test('AgentQueryOptions: elicitation, permission prompts, suggestions, ultracode are optional', () => {
+  const legacy: AgentQueryOptions = { cwd: '/w' }
+  assert.equal(legacy.onElicitation, undefined)
+  assert.equal(legacy.permissionPrompts, undefined)
+
+  const form: NormalizedElicitationRequest = {
+    serverName: 'github',
+    message: 'Pick a repo',
+    mode: 'form',
+    requestedSchema: { type: 'object', properties: { repo: { type: 'string' } } },
+    raw: {}
+  }
+  const login: NormalizedElicitationRequest = {
+    serverName: 'linear',
+    message: 'Sign in',
+    mode: 'url',
+    url: 'https://example.com/oauth',
+    elicitationId: 'e1',
+    raw: {}
+  }
+  const unattended: AgentPermissionPrompts = 'none'
+  const opts: AgentQueryOptions = {
+    permissionPrompts: unattended,
+    promptSuggestions: true,
+    ultracode: true,
+    onElicitation: async (req): Promise<NormalizedElicitationResult> =>
+      req.mode === 'form'
+        ? { action: 'accept', content: { repo: 'ottimis/jack' } }
+        : { action: 'decline' }
+  }
+  return (async () => {
+    assert.deepEqual(await opts.onElicitation?.(form), {
+      action: 'accept',
+      content: { repo: 'ottimis/jack' }
+    })
+    assert.deepEqual(await opts.onElicitation?.(login), { action: 'decline' })
+  })()
+})
+
+test('AgentSession: sendNow / ultracode / directories / MCP control / commands are presence-based', () => {
+  type Required = Pick<
+    AgentSession,
+    | 'interrupt'
+    | 'close'
+    | 'getContextUsage'
+    | 'stopTask'
+    | 'setPermissionMode'
+    | 'setModel'
+    | 'setEffortLevel'
+    | 'getSettings'
+  >
+  const base = null as unknown as Required & AsyncIterable<never>
+  // An older backend without any of the new methods still satisfies the interface.
+  const legacy: AgentSession = base
+  assert.equal(legacy, null)
+
+  const calls: string[] = []
+  let listener: ((commands: SlashCommandDef[]) => void) | undefined
+  const modern: Pick<
+    AgentSession,
+    | 'sendNow'
+    | 'setUltracode'
+    | 'addDirectory'
+    | 'reconnectMcpServer'
+    | 'toggleMcpServer'
+    | 'subscribeCommands'
+  > = {
+    sendNow: async (p) => void calls.push(`now:${p}`),
+    setUltracode: async (on) => void calls.push(`ultra:${on}`),
+    addDirectory: async (d) => void calls.push(`dir:${d}`),
+    reconnectMcpServer: async (n) => void calls.push(`reconnect:${n}`),
+    toggleMcpServer: async (n, on) => void calls.push(`toggle:${n}:${on}`),
+    subscribeCommands: (cb) => {
+      listener = cb
+      cb([{ name: 'review', description: 'Review', scope: 'wire' }])
+      return () => {
+        listener = undefined
+      }
+    }
+  }
+  return (async () => {
+    await modern.sendNow?.('stop and do X')
+    await modern.setUltracode?.(true)
+    await modern.addDirectory?.('/repo/other')
+    await modern.reconnectMcpServer?.('github')
+    await modern.toggleMcpServer?.('github', false)
+    assert.deepEqual(calls, [
+      'now:stop and do X',
+      'ultra:true',
+      'dir:/repo/other',
+      'reconnect:github',
+      'toggle:github:false'
+    ])
+    const seen: SlashCommandDef[][] = []
+    const off = modern.subscribeCommands?.((c) => seen.push(c))
+    assert.equal(seen.length, 1)
+    assert.equal(seen[0]?.[0]?.scope, 'wire')
+    off?.()
+    assert.equal(listener, undefined)
+  })()
+})
+
+test('CapabilityMatrix.sendNow / promptSuggestions and ProviderModelOption.supportsUltracode are optional', () => {
+  const base: CapabilityMatrix = {
+    partialMessages: false,
+    hooks: { PreToolUse: false, PostToolUse: false },
+    planMode: false,
+    askUserQuestion: false,
+    subagents: 'none',
+    mcp: true,
+    structuredPatch: false,
+    resumeSession: false,
+    liveModelSwitch: false,
+    liveEffortSwitch: false,
+    livePermissionModeSwitch: false,
+    permissionGranularity: 'callback',
+    usage: false,
+    profiles: false,
+    sandbox: false,
+    oneshot: false,
+    permissionModes: ['default']
+  }
+  assert.equal(base.sendNow, undefined)
+  assert.equal(base.promptSuggestions, undefined)
+  const modern: CapabilityMatrix = { ...base, sendNow: true, promptSuggestions: true }
+  assert.equal(modern.sendNow, true)
+
+  const plain: ProviderModelOption = { value: 'sonnet', label: 'Sonnet' }
+  assert.equal(plain.supportsUltracode, undefined)
+  const ultra: ProviderModelOption = { value: 'opus', label: 'Opus', supportsUltracode: true }
+  assert.equal(ultra.supportsUltracode, true)
 })

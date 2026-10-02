@@ -26,6 +26,7 @@
  */
 
 import type { ProcessSpawner } from './spawner'
+import type { SlashCommandDef } from './provider'
 import type {
   NormalizedMessage,
   NormalizedPermissionRequest,
@@ -176,6 +177,53 @@ export type AgentSessionInfo = {
  */
 export type AgentUserPrompt = string
 
+/**
+ * Who answers the provider's permission prompts.
+ *
+ *   - `'host'` — the host does, through {@link AgentQueryOptions.canUseTool}
+ *     (default when absent).
+ *   - `'none'` — nobody is watching (unattended runs): every call that
+ *     would prompt is denied instead of waiting. Claude maps it to
+ *     `--permission-prompts`.
+ */
+export type AgentPermissionPrompts = 'host' | 'none'
+
+/**
+ * Input an MCP server asks of the user mid-call (MCP elicitation).
+ *
+ *   - `mode: 'form'` — fill the flat JSON schema in `requestedSchema`; the
+ *     answer travels back as {@link NormalizedElicitationResult.content}.
+ *   - `mode: 'url'` — open `url` (typically an OAuth/login page) and report
+ *     whether the user went through with it; no `content`.
+ *
+ * `message` is renderer-safe text from the server, never to be parsed.
+ */
+export type NormalizedElicitationRequest = {
+  /** Name of the MCP server asking, as configured in `mcpServers`. */
+  serverName: string
+  message: string
+  mode: 'form' | 'url'
+  /** Present when `mode === 'url'`. */
+  url?: string
+  /** Flat JSON schema of the requested fields. Present when `mode === 'form'`. */
+  requestedSchema?: Record<string, unknown>
+  /** Provider/server correlation id, opaque to the host. */
+  elicitationId?: string
+  title?: string
+  /** Wire payload, for diagnostics only. */
+  raw: unknown
+}
+
+/**
+ * The user's answer to a {@link NormalizedElicitationRequest}.
+ * `'decline'` = explicit refusal, `'cancel'` = dismissed without choosing.
+ * `content` is only meaningful with `action: 'accept'` on a form request.
+ */
+export type NormalizedElicitationResult = {
+  action: 'accept' | 'decline' | 'cancel'
+  content?: Record<string, unknown>
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Query options & input
 // ─────────────────────────────────────────────────────────────────────────────
@@ -257,6 +305,31 @@ export type AgentQueryOptions = {
    */
   canUseTool?: (req: NormalizedPermissionRequest) => Promise<NormalizedPermissionResult>
   hooks?: AgentHooks
+  /**
+   * Answers input requests raised by MCP servers (form or login URL).
+   * Absent ⇒ the provider declines every elicitation on the host's behalf,
+   * so the server sees a refusal rather than a hang.
+   */
+  onElicitation?: (req: NormalizedElicitationRequest) => Promise<NormalizedElicitationResult>
+  /**
+   * Who answers permission prompts. Absent ⇒ `'host'`. `'none'` is for
+   * unattended sessions: anything that would prompt is denied.
+   */
+  permissionPrompts?: AgentPermissionPrompts
+  /**
+   * Emit a `prompt_suggestion` message (a likely next user prompt) after
+   * each turn. Only meaningful when the provider declares
+   * {@link CapabilityMatrix.promptSuggestions}; others ignore it.
+   */
+  promptSuggestions?: boolean
+  /**
+   * Start with "ultracode" on — the provider's extended-effort coding mode,
+   * a toggle separate from {@link effort}. The host MUST only set it when
+   * the chosen model declares {@link ProviderModelOption.supportsUltracode};
+   * providers ignore it otherwise and MUST NOT throw. Live switches use
+   * {@link AgentSession.setUltracode}.
+   */
+  ultracode?: boolean
 }
 
 export type AgentQueryInput = {
@@ -309,6 +382,39 @@ export interface AgentSession extends AsyncIterable<NormalizedMessage> {
    * keys without an SDK bump.
    */
   getSettings(): Promise<AgentSettingsResponse>
+  /**
+   * Deliver `prompt` immediately: interrupt the current turn, send it ahead
+   * of the queue, and let tool calls already running continue in the
+   * background instead of being cancelled. Presence-based — paired with
+   * {@link CapabilityMatrix.sendNow}; absent ⇒ the host queues the prompt
+   * (or interrupts then sends).
+   */
+  sendNow?(prompt: AgentUserPrompt): Promise<void>
+  /**
+   * Toggle ultracode live (see {@link AgentQueryOptions.ultracode}).
+   * Absent ⇒ the host respawns with the new value.
+   */
+  setUltracode?(on: boolean): Promise<void>
+  /**
+   * Add a working directory to the live session — the runtime counterpart
+   * of {@link AgentQueryOptions.additionalDirectories}. Absent ⇒ the change
+   * applies at the next spawn.
+   */
+  addDirectory?(path: string): Promise<void>
+  /** Reconnect a configured MCP server (e.g. after it failed or needed auth). */
+  reconnectMcpServer?(name: string): Promise<void>
+  /** Enable or disable a configured MCP server for this session. */
+  toggleMcpServer?(name: string, enabled: boolean): Promise<void>
+  /**
+   * Slash catalog the live session can execute. `cb` receives the
+   * **complete** set (never a delta) right after start and on every change;
+   * entries carry `scope: 'wire'`. Returns the unsubscribe function.
+   * Session-scoped counterpart of `SlashCommandSupport.subscribeToWireCommands`
+   * (same merge rules); the host prefers this one when both exist.
+   * Absent ⇒ the host relies on the provider's static
+   * `slashCommands.builtins` / `scanCommands`.
+   */
+  subscribeCommands?(cb: (commands: SlashCommandDef[]) => void): () => void
 }
 
 /**

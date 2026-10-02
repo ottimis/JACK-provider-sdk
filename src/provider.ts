@@ -490,6 +490,15 @@ export type ProviderModelOption = {
    * model single-source.
    */
   effortLevels?: readonly AgentEffortLevel[]
+  /**
+   * Whether this model accepts "ultracode" — the provider's extended-effort
+   * coding mode, toggled independently of the effort tier. When `true` the
+   * renderer offers the toggle and the host threads
+   * {@link AgentQueryOptions.ultracode} / `AgentSession.setUltracode`.
+   * Absent ⇒ no toggle. Per-model for the same reason as
+   * {@link supportsFastMode}.
+   */
+  supportsUltracode?: boolean
 }
 
 /**
@@ -669,6 +678,19 @@ export type CapabilityMatrix = {
    * turns does not qualify.
    */
   authoritativeIdle?: boolean
+  /**
+   * The provider honours `AgentSession.sendNow` with "deliver now"
+   * semantics: the running turn is interrupted, the prompt is sent at once,
+   * and tool calls already in flight keep running in the background.
+   * Absent/false ⇒ the host offers only queueing (or interrupt-then-send).
+   */
+  sendNow?: boolean
+  /**
+   * The provider can emit `prompt_suggestion` messages after each turn when
+   * the spawn sets {@link AgentQueryOptions.promptSuggestions}.
+   * Absent/false ⇒ the host never asks for them.
+   */
+  promptSuggestions?: boolean
 }
 
 /**

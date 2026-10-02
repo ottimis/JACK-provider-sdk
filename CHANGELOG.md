@@ -2,6 +2,27 @@
 
 All notable changes to `@ottimis/jack-provider-sdk` will be documented in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.34.0] — 2026-10-02
+
+### Added
+
+Claude Code 2.1.287 alignment (contract `_shared/api/claude-code-2-1-287-contract.md` §2) — primitives a GUI host can drive without knowing the provider. Type declarations only, no runtime code; requires `@ottimis/jack-chat-core` ≥ 0.12.0.
+
+- `AgentQueryOptions.onElicitation?` with `NormalizedElicitationRequest` (`mode: 'form'` + `requestedSchema`, or `mode: 'url'` + `url`) / `NormalizedElicitationResult` (`accept` | `decline` | `cancel`, optional `content`) — input requested by an MCP server. Absent ⇒ the provider declines.
+- `AgentQueryOptions.permissionPrompts?: AgentPermissionPrompts` (`'host'` | `'none'`) — `'none'` denies everything that would prompt, for unattended sessions.
+- `AgentQueryOptions.promptSuggestions?` — ask for a `prompt_suggestion` after each turn; gated by `CapabilityMatrix.promptSuggestions?`.
+- `AgentQueryOptions.ultracode?` + `AgentSession.setUltracode?(on)` — extended-effort coding toggle, separate from `effort`; gated per model by `ProviderModelOption.supportsUltracode?`.
+- `AgentSession.sendNow?(prompt)` — deliver now: interrupt the turn, send ahead of the queue, in-flight tools keep running in background; gated by `CapabilityMatrix.sendNow?`.
+- `AgentSession.addDirectory?(path)` — add a working directory to a live session.
+- `AgentSession.reconnectMcpServer?(name)` / `toggleMcpServer?(name, enabled)` — MCP server control.
+- `AgentSession.subscribeCommands?(cb)` — full live slash catalog (`scope: 'wire'`) on start and on every change; returns unsubscribe.
+
+### Changed
+
+- Peer dependency `@ottimis/jack-chat-core` raised to `>=0.12.0` (dev dependency pinned to `0.12.0`).
+
+No breaking changes for providers — every addition is optional and presence-based.
+
 ## [0.33.0] — 2026-10-02
 
 ### Added
