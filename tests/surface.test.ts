@@ -13,6 +13,7 @@ import {
   type AgentPermissionPrompts,
   type AgentQueryOptions,
   type AgentSession,
+  type AgentTaskOutput,
   type AgentSettingsResponse,
   type AgentSystemPrompt,
   type BackendDescriptor,
@@ -995,7 +996,7 @@ test('AgentQueryOptions: elicitation, permission prompts, suggestions, ultracode
   })()
 })
 
-test('AgentSession: sendNow / ultracode / directories / MCP control / commands are presence-based', () => {
+test('AgentSession: sendNow / ultracode / directories / MCP control / commands / task output are presence-based', () => {
   type Required = Pick<
     AgentSession,
     | 'interrupt'
@@ -1022,6 +1023,7 @@ test('AgentSession: sendNow / ultracode / directories / MCP control / commands a
     | 'reconnectMcpServer'
     | 'toggleMcpServer'
     | 'subscribeCommands'
+    | 'getTaskOutput'
   > = {
     sendNow: async (p) => void calls.push(`now:${p}`),
     setUltracode: async (on) => void calls.push(`ultra:${on}`),
@@ -1034,6 +1036,10 @@ test('AgentSession: sendNow / ultracode / directories / MCP control / commands a
       return () => {
         listener = undefined
       }
+    },
+    getTaskOutput: async (id) => {
+      if (id === 'agent-1') throw new Error('not a command task')
+      return { output: 'tail\n', totalBytes: 9000, truncated: true }
     }
   }
   return (async () => {
@@ -1055,6 +1061,9 @@ test('AgentSession: sendNow / ultracode / directories / MCP control / commands a
     assert.equal(seen[0]?.[0]?.scope, 'wire')
     off?.()
     assert.equal(listener, undefined)
+    const out: AgentTaskOutput | undefined = await modern.getTaskOutput?.('bash-1')
+    assert.deepEqual(out, { output: 'tail\n', totalBytes: 9000, truncated: true })
+    await assert.rejects(() => modern.getTaskOutput?.('agent-1') ?? Promise.resolve())
   })()
 })
 

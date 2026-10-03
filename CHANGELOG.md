@@ -2,6 +2,17 @@
 
 All notable changes to `@ottimis/jack-provider-sdk` will be documented in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.35.0] — 2026-10-03
+
+### Added
+
+Background task output (contract `_shared/api/background-task-output.md` §2). Type declarations only, no runtime code.
+
+- `AgentTaskOutput` — `{ output, totalBytes, truncated }`: the tail of what a background task has written so far.
+- `AgentSession.getTaskOutput?(taskId)` — read a task's current output, running or ended; `taskId` from `task_event`. Presence-based (no capability flag): absent ⇒ the host offers no output view; a rejection (task kind the provider can't read, closed session) ⇒ "no output available".
+
+No breaking changes — the method is optional.
+
 ## [0.34.0] — 2026-10-02
 
 ### Added

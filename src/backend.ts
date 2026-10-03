@@ -341,6 +341,16 @@ export type AgentQueryInput = {
 // Session interface
 // ─────────────────────────────────────────────────────────────────────────────
 
+/** The end of what a background task has written so far. */
+export type AgentTaskOutput = {
+  /** Tail of the output, decoded text. Empty when nothing was written yet. */
+  output: string
+  /** Size of the whole output in bytes. */
+  totalBytes: number
+  /** `output` holds only the end of a longer output. */
+  truncated: boolean
+}
+
 /**
  * Session-like object returned by backend.query(). Mirrors the subset of
  * the provider's runtime control surface that the host actually depends
@@ -415,6 +425,18 @@ export interface AgentSession extends AsyncIterable<NormalizedMessage> {
    * `slashCommands.builtins` / `scanCommands`.
    */
   subscribeCommands?(cb: (commands: SlashCommandDef[]) => void): () => void
+  /**
+   * Read the current output of a task of this session, running or ended.
+   * `taskId` is the one from `task_event`. Returns the tail only — how much
+   * is the provider's own limit, `truncated` / `totalBytes` say so; the host
+   * never asks for a range and re-polls while its view is open.
+   * Rejects for a task kind the provider cannot read (e.g. a subagent) and
+   * on a closed session; the host treats a rejection as "no output
+   * available", never as a session error.
+   * Absent ⇒ the provider cannot read task output and the host offers no
+   * output view.
+   */
+  getTaskOutput?(taskId: string): Promise<AgentTaskOutput>
 }
 
 /**
